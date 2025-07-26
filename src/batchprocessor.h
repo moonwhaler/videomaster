@@ -22,6 +22,7 @@ public:
     explicit BatchProcessor(QWidget *parent = nullptr);
     
     void setOutputPostfix(const QString &postfix);
+    void applyTheme();
 
 signals:
     void batchProcessRequested();
@@ -43,6 +44,7 @@ private slots:
     void onSelectAllSubtitles();
     void onClearAudioSelection();
     void onClearSubtitleSelection();
+    void onThemeChanged();
 
 private:
     void setupUI();

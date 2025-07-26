@@ -1,7 +1,9 @@
 #include "videowidget.h"
+#include "thememanager.h"
 #include <QFileInfo>
 #include <QTime>
 #include <QCoreApplication>
+#include <QTimer>
 
 VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     : QWidget(parent)
@@ -19,6 +21,10 @@ VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     
     m_mediaPlayer->setVideoOutput(m_videoWidget);
     
+    // Connect to theme manager
+    connect(ThemeManager::instance(), &ThemeManager::themeChanged,
+            this, &VideoWidget::onThemeChanged);
+    
     connect(m_playButton, &QPushButton::clicked, this, &VideoWidget::onPlayPause);
     connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, &VideoWidget::onPositionChanged);
     connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, &VideoWidget::onDurationChanged);
@@ -28,20 +34,24 @@ VideoWidget::VideoWidget(const QString &title, QWidget *parent)
 void VideoWidget::setupUI()
 {
     m_titleLabel->setAlignment(Qt::AlignCenter);
-    m_titleLabel->setStyleSheet("font-weight: bold; font-size: 14px;");
     
-    m_videoWidget->setMinimumSize(320, 240);
+    m_videoWidget->setMinimumSize(300, 200);
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
     m_dropLabel->setAlignment(Qt::AlignCenter);
-    m_dropLabel->setStyleSheet("border: 2px dashed #aaa; padding: 20px; color: #aaa;");
-    m_dropLabel->setMinimumSize(320, 240);
+    m_dropLabel->setMinimumSize(300, 200);
+    
+    m_timeLabel->setAlignment(Qt::AlignCenter);
     
     QHBoxLayout *controlsLayout = new QHBoxLayout();
+    controlsLayout->setContentsMargins(0, 4, 0, 0);
+    controlsLayout->setSpacing(6);
     controlsLayout->addWidget(m_playButton);
-    controlsLayout->addWidget(m_positionSlider);
+    controlsLayout->addWidget(m_positionSlider, 1);
     controlsLayout->addWidget(m_timeLabel);
     
+    m_layout->setContentsMargins(0, 0, 0, 0);
+    m_layout->setSpacing(4);
     m_layout->addWidget(m_titleLabel);
     m_layout->addWidget(m_dropLabel);
     m_layout->addWidget(m_videoWidget);
@@ -50,6 +60,9 @@ void VideoWidget::setupUI()
     m_videoWidget->hide();
     m_playButton->setEnabled(false);
     m_positionSlider->setEnabled(false);
+    
+    // Apply initial theme
+    applyTheme();
 }
 
 void VideoWidget::dragEnterEvent(QDragEnterEvent *event)
@@ -166,4 +179,56 @@ void VideoWidget::onPositionChanged(qint64 position)
 void VideoWidget::onDurationChanged(qint64 duration)
 {
     m_positionSlider->setRange(0, duration);
+}
+
+void VideoWidget::applyTheme()
+{
+    ThemeManager* theme = ThemeManager::instance();
+    
+    // Apply theme to title label
+    m_titleLabel->setStyleSheet(QString(
+        "font-size: 12px; font-weight: 500; color: %1; padding: 2px;"
+    ).arg(theme->secondaryTextColor()));
+    
+    // Apply theme to video widget
+    m_videoWidget->setStyleSheet(QString(
+        "background-color: #000000; border: 1px solid %1; border-radius: 3px;"
+    ).arg(theme->borderColor()));
+    
+    // Apply theme to drop label
+    m_dropLabel->setStyleSheet(QString(
+        "border: 2px dashed %1; "
+        "padding: 40px 20px; "
+        "color: %2; "
+        "font-size: 13px; "
+        "background-color: %3; "
+        "border-radius: 3px;"
+    ).arg(theme->borderColor())
+     .arg(theme->secondaryTextColor())
+     .arg(theme->surfaceColor()));
+    
+    // Apply theme to controls
+    m_playButton->setStyleSheet(theme->buttonStyleSheet());
+    m_positionSlider->setStyleSheet(theme->sliderStyleSheet());
+    
+    // Apply theme to time label with monospace font
+    m_timeLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+        "   font-size: 11px; "
+        "   color: %1; "
+        "   background-color: %2; "
+        "   border: 1px solid %3; "
+        "   border-radius: 3px; "
+        "   padding: 3px 6px; "
+        "   min-width: 70px; "
+        "}"
+    ).arg(theme->textColor())
+     .arg(theme->backgroundColor())
+     .arg(theme->borderColor()));
+}
+
+void VideoWidget::onThemeChanged()
+{
+    applyTheme();
 }

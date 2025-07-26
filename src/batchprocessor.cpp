@@ -1,5 +1,6 @@
 #include "batchprocessor.h"
 #include "ffmpeghandler.h"
+#include "thememanager.h"
 #include <QFileDialog>
 #include <QDir>
 #include <QFileInfo>
@@ -16,51 +17,69 @@ BatchProcessor::BatchProcessor(QWidget *parent)
     , m_currentPostfix("_merged")
     , m_processingCancelled(false)
 {
+    // Connect to theme manager
+    connect(ThemeManager::instance(), &ThemeManager::themeChanged,
+            this, &BatchProcessor::onThemeChanged);
+            
     setupUI();
+    
+    // Apply initial theme after UI is set up
+    applyTheme();
 }
 
 void BatchProcessor::setupUI()
 {
-    // Directory selection section with better terminology
-    QGroupBox *directionGroup = new QGroupBox("📂 Input & Output Directories");
+    ThemeManager* theme = ThemeManager::instance();
+    
+    // Directory selection section with clean business styling
+    QGroupBox *directionGroup = new QGroupBox("Input & Output Directories");
+    directionGroup->setStyleSheet(theme->groupBoxStyleSheet());
     QVBoxLayout *dirLayout = new QVBoxLayout(directionGroup);
+    dirLayout->setSpacing(8);
+    dirLayout->setContentsMargins(12, 12, 12, 12);
     
     QHBoxLayout *sourceLayout = new QHBoxLayout();
-    QLabel *sourceLabel = new QLabel("📁 Tracks Input Directory (videos with tracks to copy FROM):");
-    sourceLabel->setStyleSheet("color: #4CAF50; font-weight: bold;");
+    QLabel *sourceLabel = new QLabel("Source Directory (videos with tracks to copy FROM):");
+    sourceLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1; margin-bottom: 4px;").arg(theme->textColor()));
     sourceLayout->addWidget(sourceLabel);
     sourceLayout->addStretch();
     
     QHBoxLayout *sourcePathLayout = new QHBoxLayout();
+    sourcePathLayout->setSpacing(6);
     m_sourceDirectoryEdit = new QLineEdit();
-    m_sourceDirectoryEdit->setStyleSheet("border: 2px solid #4CAF50; border-radius: 4px; padding: 4px;");
+    m_sourceDirectoryEdit->setStyleSheet(theme->lineEditStyleSheet());
     m_selectSourceButton = new QPushButton("Browse");
+    m_selectSourceButton->setStyleSheet(theme->buttonStyleSheet());
     sourcePathLayout->addWidget(m_sourceDirectoryEdit);
     sourcePathLayout->addWidget(m_selectSourceButton);
     
     QHBoxLayout *targetLayout = new QHBoxLayout();
-    QLabel *targetLabel = new QLabel("🎯 Base Videos Input Directory (videos to receive tracks):");
-    targetLabel->setStyleSheet("color: #2196F3; font-weight: bold;");
+    QLabel *targetLabel = new QLabel("Target Directory (videos to receive tracks):");
+    targetLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1; margin-bottom: 4px;").arg(theme->textColor()));
     targetLayout->addWidget(targetLabel);
     targetLayout->addStretch();
     
     QHBoxLayout *targetPathLayout = new QHBoxLayout();
+    targetPathLayout->setSpacing(6);
     m_targetDirectoryEdit = new QLineEdit();
-    m_targetDirectoryEdit->setStyleSheet("border: 2px solid #2196F3; border-radius: 4px; padding: 4px;");
+    m_targetDirectoryEdit->setStyleSheet(theme->lineEditStyleSheet());
     m_selectTargetButton = new QPushButton("Browse");
+    m_selectTargetButton->setStyleSheet(theme->buttonStyleSheet());
     targetPathLayout->addWidget(m_targetDirectoryEdit);
     targetPathLayout->addWidget(m_selectTargetButton);
     
     QHBoxLayout *outputLayout = new QHBoxLayout();
-    QLabel *outputLabel = new QLabel("💾 Output Directory (where merged videos will be saved):");
-    outputLabel->setStyleSheet("color: #FF9800; font-weight: bold;");
+    QLabel *outputLabel = new QLabel("Output Directory (where merged videos will be saved):");
+    outputLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1; margin-bottom: 4px;").arg(theme->textColor()));
     outputLayout->addWidget(outputLabel);
     outputLayout->addStretch();
     
     QHBoxLayout *outputPathLayout = new QHBoxLayout();
+    outputPathLayout->setSpacing(6);
     m_outputDirectoryEdit = new QLineEdit();
-    m_outputDirectoryEdit->setStyleSheet("border: 2px solid #FF9800; border-radius: 4px; padding: 4px;");
+    m_outputDirectoryEdit->setStyleSheet(theme->lineEditStyleSheet());
     m_selectOutputButton = new QPushButton("Browse");
+    m_selectOutputButton->setStyleSheet(theme->buttonStyleSheet());
     outputPathLayout->addWidget(m_outputDirectoryEdit);
     outputPathLayout->addWidget(m_selectOutputButton);
     
@@ -73,60 +92,213 @@ void BatchProcessor::setupUI()
     dirLayout->addLayout(outputLayout);
     dirLayout->addLayout(outputPathLayout);
     
-    // File matching section with color coding
-    QGroupBox *matchingGroup = new QGroupBox("🔗 File Matching & Pairing");
+    // File matching section with clean business styling
+    QGroupBox *matchingGroup = new QGroupBox("File Matching & Pairing");
+    matchingGroup->setStyleSheet(
+        "QGroupBox { "
+        "   font-size: 13px; "
+        "   font-weight: 600; "
+        "   color: #24292f; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 6px; "
+        "   margin-top: 6px; "
+        "   background-color: #ffffff; "
+        "} "
+        "QGroupBox::title { "
+        "   subcontrol-origin: margin; "
+        "   subcontrol-position: top left; "
+        "   padding: 0 8px; "
+        "   background-color: #ffffff; "
+        "}"
+    );
     QHBoxLayout *matchingLayout = new QHBoxLayout(matchingGroup);
+    matchingLayout->setSpacing(12);
+    matchingLayout->setContentsMargins(12, 12, 12, 12);
     
     QVBoxLayout *sourceFilesLayout = new QVBoxLayout();
-    QLabel *sourceFilesLabel = new QLabel("📁 Track Files (FROM these):");
-    sourceFilesLabel->setStyleSheet("color: #4CAF50; font-weight: bold;");
+    sourceFilesLayout->setSpacing(6);
+    QLabel *sourceFilesLabel = new QLabel("Source Files (FROM these):");
+    sourceFilesLabel->setStyleSheet("font-size: 12px; font-weight: 500; color: #24292f; margin-bottom: 4px;");
     sourceFilesLayout->addWidget(sourceFilesLabel);
     m_sourceFilesList = new QListWidget();
-    m_sourceFilesList->setStyleSheet("border: 2px solid #4CAF50; border-radius: 4px;");
+    m_sourceFilesList->setStyleSheet(
+        "QListWidget { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #ffffff; "
+        "   font-size: 12px; "
+        "   selection-background-color: #0969da; "
+        "   selection-color: #ffffff; "
+        "} "
+        "QListWidget::item { "
+        "   padding: 4px 8px; "
+        "   border-bottom: 1px solid #f6f8fa; "
+        "} "
+        "QListWidget::item:hover { "
+        "   background-color: #f6f8fa; "
+        "}"
+    );
     sourceFilesLayout->addWidget(m_sourceFilesList);
     
     QVBoxLayout *controlsLayout = new QVBoxLayout();
-    m_autoMatchButton = new QPushButton("🤖 Auto Match");
+    controlsLayout->setSpacing(6);
+    controlsLayout->setContentsMargins(8, 0, 8, 0);
+    m_autoMatchButton = new QPushButton("Auto Match");
     m_autoMatchButton->setToolTip("Automatically match files based on similar names");
-    m_moveUpButton = new QPushButton("⬆️ Move Up");
-    m_moveDownButton = new QPushButton("⬇️ Move Down");
+    m_autoMatchButton->setStyleSheet(theme->primaryButtonStyleSheet());
+    m_moveUpButton = new QPushButton("Move Up");
+    m_moveUpButton->setStyleSheet(theme->buttonStyleSheet());
+    m_moveDownButton = new QPushButton("Move Down");
+    m_moveDownButton->setStyleSheet(theme->buttonStyleSheet());
     controlsLayout->addWidget(m_autoMatchButton);
     controlsLayout->addStretch();
-    controlsLayout->addWidget(new QLabel("Reorder Target Files:"));
+    QLabel *reorderLabel = new QLabel("Reorder Target Files:");
+    reorderLabel->setStyleSheet(QString("font-size: 11px; font-weight: 500; color: %1; margin-top: 8px;").arg(theme->secondaryTextColor()));
+    controlsLayout->addWidget(reorderLabel);
     controlsLayout->addWidget(m_moveUpButton);
     controlsLayout->addWidget(m_moveDownButton);
     controlsLayout->addStretch();
     
     QVBoxLayout *targetFilesLayout = new QVBoxLayout();
-    QLabel *targetFilesLabel = new QLabel("🎯 Base Video Files (TO these):");
-    targetFilesLabel->setStyleSheet("color: #2196F3; font-weight: bold;");
+    targetFilesLayout->setSpacing(6);
+    QLabel *targetFilesLabel = new QLabel("Target Files (TO these):");
+    targetFilesLabel->setStyleSheet("font-size: 12px; font-weight: 500; color: #24292f; margin-bottom: 4px;");
     targetFilesLayout->addWidget(targetFilesLabel);
     m_targetFilesList = new QListWidget();
-    m_targetFilesList->setStyleSheet("border: 2px solid #2196F3; border-radius: 4px;");
+    m_targetFilesList->setStyleSheet(
+        "QListWidget { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #ffffff; "
+        "   font-size: 12px; "
+        "   selection-background-color: #0969da; "
+        "   selection-color: #ffffff; "
+        "} "
+        "QListWidget::item { "
+        "   padding: 4px 8px; "
+        "   border-bottom: 1px solid #f6f8fa; "
+        "} "
+        "QListWidget::item:hover { "
+        "   background-color: #f6f8fa; "
+        "}"
+    );
     targetFilesLayout->addWidget(m_targetFilesList);
     
     matchingLayout->addLayout(sourceFilesLayout);
     matchingLayout->addLayout(controlsLayout);
     matchingLayout->addLayout(targetFilesLayout);
     
-    // Track selection with merge approach (same as main Track Transfer tab)
+    // Track selection with clean business styling
     QHBoxLayout *tracksOptionsLayout = new QHBoxLayout();
+    tracksOptionsLayout->setSpacing(12);
     
-    // Audio tracks section showing all tracks from both videos
-    QGroupBox *audioGroup = new QGroupBox("🎵 Audio Tracks Selection (template-based for batch scale)");
-    audioGroup->setStyleSheet("QGroupBox::title { color: #333; font-weight: bold; }");
+    // Audio tracks section
+    QGroupBox *audioGroup = new QGroupBox("Audio Tracks Selection");
+    audioGroup->setStyleSheet(
+        "QGroupBox { "
+        "   font-size: 13px; "
+        "   font-weight: 600; "
+        "   color: #24292f; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 6px; "
+        "   margin-top: 6px; "
+        "   background-color: #ffffff; "
+        "} "
+        "QGroupBox::title { "
+        "   subcontrol-origin: margin; "
+        "   subcontrol-position: top left; "
+        "   padding: 0 8px; "
+        "   background-color: #ffffff; "
+        "}"
+    );
     QVBoxLayout *audioLayout = new QVBoxLayout(audioGroup);
+    audioLayout->setSpacing(8);
+    audioLayout->setContentsMargins(12, 12, 12, 12);
     
     // Audio template controls
     QHBoxLayout *audioTemplateLayout = new QHBoxLayout();
-    audioTemplateLayout->addWidget(new QLabel("Template:"));
+    audioTemplateLayout->setSpacing(6);
+    QLabel *audioTemplateLabel = new QLabel("Template:");
+    audioTemplateLabel->setStyleSheet("font-size: 12px; font-weight: 500; color: #24292f;");
+    audioTemplateLayout->addWidget(audioTemplateLabel);
     m_audioTemplateEdit = new QLineEdit("*eng*");
     m_audioTemplateEdit->setPlaceholderText("e.g., *eng*, *jpn*, *deu*, *ac3*");
+    m_audioTemplateEdit->setStyleSheet(
+        "QLineEdit { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   padding: 6px 8px; "
+        "   font-size: 12px; "
+        "   background-color: #ffffff; "
+        "   color: #24292f; "
+        "} "
+        "QLineEdit:focus { "
+        "   border-color: #0969da; "
+        "   outline: none; "
+        "}"
+    );
     m_applyAudioTemplateButton = new QPushButton("Apply");
+    m_applyAudioTemplateButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #0969da; "
+        "   border: 1px solid #0969da; "
+        "   border-radius: 3px; "
+        "   color: #ffffff; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 6px 12px; "
+        "   min-width: 50px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #0860ca; "
+        "   border-color: #0860ca; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #0757ba; "
+        "}"
+    );
     m_selectAllAudioButton = new QPushButton("All");
+    m_selectAllAudioButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #f6f8fa; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   color: #24292f; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 6px 12px; "
+        "   min-width: 40px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #eaeef2; "
+        "   border-color: #afb8c1; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #e1e6ea; "
+        "}"
+    );
     m_clearAudioButton = new QPushButton("Clear");
+    m_clearAudioButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #f6f8fa; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   color: #24292f; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 6px 12px; "
+        "   min-width: 50px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #eaeef2; "
+        "   border-color: #afb8c1; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #e1e6ea; "
+        "}"
+    );
     
-    audioTemplateLayout->addWidget(m_audioTemplateEdit);
+    audioTemplateLayout->addWidget(m_audioTemplateEdit, 1);
     audioTemplateLayout->addWidget(m_applyAudioTemplateButton);
     audioTemplateLayout->addWidget(m_selectAllAudioButton);
     audioTemplateLayout->addWidget(m_clearAudioButton);
@@ -134,25 +306,134 @@ void BatchProcessor::setupUI()
     m_audioTracksList = new QListWidget();
     m_audioTracksList->setMaximumHeight(150);
     m_audioTracksList->setToolTip("Template selects tracks from source videos to ADD to existing tracks");
+    m_audioTracksList->setStyleSheet(
+        "QListWidget { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #ffffff; "
+        "   font-size: 12px; "
+        "   selection-background-color: #0969da; "
+        "   selection-color: #ffffff; "
+        "} "
+        "QListWidget::item { "
+        "   padding: 4px 8px; "
+        "   border-bottom: 1px solid #f6f8fa; "
+        "} "
+        "QListWidget::item:hover { "
+        "   background-color: #f6f8fa; "
+        "}"
+    );
     
     audioLayout->addLayout(audioTemplateLayout);
     audioLayout->addWidget(m_audioTracksList);
     
-    // Subtitle tracks section showing all tracks from both videos
-    QGroupBox *subtitleGroup = new QGroupBox("💬 Subtitle Tracks Selection (template-based for batch scale)");
-    subtitleGroup->setStyleSheet("QGroupBox::title { color: #333; font-weight: bold; }");
+    // Subtitle tracks section
+    QGroupBox *subtitleGroup = new QGroupBox("Subtitle Tracks Selection");
+    subtitleGroup->setStyleSheet(
+        "QGroupBox { "
+        "   font-size: 13px; "
+        "   font-weight: 600; "
+        "   color: #24292f; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 6px; "
+        "   margin-top: 6px; "
+        "   background-color: #ffffff; "
+        "} "
+        "QGroupBox::title { "
+        "   subcontrol-origin: margin; "
+        "   subcontrol-position: top left; "
+        "   padding: 0 8px; "
+        "   background-color: #ffffff; "
+        "}"
+    );
     QVBoxLayout *subtitleLayout = new QVBoxLayout(subtitleGroup);
+    subtitleLayout->setSpacing(8);
+    subtitleLayout->setContentsMargins(12, 12, 12, 12);
     
     // Subtitle template controls
     QHBoxLayout *subtitleTemplateLayout = new QHBoxLayout();
-    subtitleTemplateLayout->addWidget(new QLabel("Template:"));
+    subtitleTemplateLayout->setSpacing(6);
+    QLabel *subtitleTemplateLabel = new QLabel("Template:");
+    subtitleTemplateLabel->setStyleSheet("font-size: 12px; font-weight: 500; color: #24292f;");
+    subtitleTemplateLayout->addWidget(subtitleTemplateLabel);
     m_subtitleTemplateEdit = new QLineEdit("*eng*");
     m_subtitleTemplateEdit->setPlaceholderText("e.g., *eng*, *jpn*, *deu*, *srt*");
+    m_subtitleTemplateEdit->setStyleSheet(
+        "QLineEdit { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   padding: 6px 8px; "
+        "   font-size: 12px; "
+        "   background-color: #ffffff; "
+        "   color: #24292f; "
+        "} "
+        "QLineEdit:focus { "
+        "   border-color: #0969da; "
+        "   outline: none; "
+        "}"
+    );
     m_applySubtitleTemplateButton = new QPushButton("Apply");
+    m_applySubtitleTemplateButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #0969da; "
+        "   border: 1px solid #0969da; "
+        "   border-radius: 3px; "
+        "   color: #ffffff; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 6px 12px; "
+        "   min-width: 50px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #0860ca; "
+        "   border-color: #0860ca; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #0757ba; "
+        "}"
+    );
     m_selectAllSubtitleButton = new QPushButton("All");
+    m_selectAllSubtitleButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #f6f8fa; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   color: #24292f; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 6px 12px; "
+        "   min-width: 40px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #eaeef2; "
+        "   border-color: #afb8c1; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #e1e6ea; "
+        "}"
+    );
     m_clearSubtitleButton = new QPushButton("Clear");
+    m_clearSubtitleButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #f6f8fa; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   color: #24292f; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 6px 12px; "
+        "   min-width: 50px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #eaeef2; "
+        "   border-color: #afb8c1; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #e1e6ea; "
+        "}"
+    );
     
-    subtitleTemplateLayout->addWidget(m_subtitleTemplateEdit);
+    subtitleTemplateLayout->addWidget(m_subtitleTemplateEdit, 1);
     subtitleTemplateLayout->addWidget(m_applySubtitleTemplateButton);
     subtitleTemplateLayout->addWidget(m_selectAllSubtitleButton);
     subtitleTemplateLayout->addWidget(m_clearSubtitleButton);
@@ -160,6 +441,23 @@ void BatchProcessor::setupUI()
     m_subtitleTracksList = new QListWidget();
     m_subtitleTracksList->setMaximumHeight(150);
     m_subtitleTracksList->setToolTip("Template selects tracks from source videos to ADD to existing tracks");
+    m_subtitleTracksList->setStyleSheet(
+        "QListWidget { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #ffffff; "
+        "   font-size: 12px; "
+        "   selection-background-color: #0969da; "
+        "   selection-color: #ffffff; "
+        "} "
+        "QListWidget::item { "
+        "   padding: 4px 8px; "
+        "   border-bottom: 1px solid #f6f8fa; "
+        "} "
+        "QListWidget::item:hover { "
+        "   background-color: #f6f8fa; "
+        "}"
+    );
     
     subtitleLayout->addLayout(subtitleTemplateLayout);
     subtitleLayout->addWidget(m_subtitleTracksList);
@@ -167,48 +465,153 @@ void BatchProcessor::setupUI()
     tracksOptionsLayout->addWidget(audioGroup);
     tracksOptionsLayout->addWidget(subtitleGroup);
     
-    // Add visual legend explaining the batch merge approach
+    // Add visual legend with clean business styling
     QHBoxLayout *legendLayout = new QHBoxLayout();
-    QLabel *legendLabel = new QLabel("📖 Batch Processing Guide:");
-    legendLabel->setStyleSheet("font-weight: bold; font-size: 12px;");
+    legendLayout->setContentsMargins(0, 8, 0, 0);
+    QLabel *legendLabel = new QLabel("Batch Processing Guide:");
+    legendLabel->setStyleSheet("font-weight: 600; font-size: 12px; color: #24292f;");
     
     QLabel *infoLabel = new QLabel("Templates select source tracks to ADD to existing target tracks (preserves originals by default)");
-    infoLabel->setStyleSheet("color: #666; font-style: italic;");
+    infoLabel->setStyleSheet("color: #656d76; font-style: italic; font-size: 12px;");
     
     legendLayout->addWidget(legendLabel);
     legendLayout->addWidget(infoLabel);
     legendLayout->addStretch();
     
-    // Optional checkbox to remove existing tracks
+    // Optional checkbox to remove existing tracks with warning styling
     QHBoxLayout *optionsLayout = new QHBoxLayout();
+    optionsLayout->setContentsMargins(0, 4, 0, 8);
     m_removeExistingTracksCheckbox = new QCheckBox("Remove existing tracks from target videos (DESTRUCTIVE - use with caution)");
     m_removeExistingTracksCheckbox->setChecked(false); // Default: preserve existing tracks
-    m_removeExistingTracksCheckbox->setStyleSheet("color: #d32f2f; font-weight: bold;");
+    m_removeExistingTracksCheckbox->setStyleSheet(
+        "QCheckBox { "
+        "   color: #cf222e; "
+        "   font-weight: 500; "
+        "   font-size: 12px; "
+        "} "
+        "QCheckBox::indicator { "
+        "   width: 16px; "
+        "   height: 16px; "
+        "} "
+        "QCheckBox::indicator:unchecked { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #ffffff; "
+        "} "
+        "QCheckBox::indicator:checked { "
+        "   border: 1px solid #cf222e; "
+        "   border-radius: 3px; "
+        "   background-color: #cf222e; "
+        "   image: url(data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/%3E%3C/svg%3E); "
+        "}"
+    );
     m_removeExistingTracksCheckbox->setToolTip("WARNING: This will completely remove existing audio/subtitle tracks from target videos!");
     
     optionsLayout->addWidget(m_removeExistingTracksCheckbox);
     optionsLayout->addStretch();
     
-    // Output settings and processing section
-    QGroupBox *processingGroup = new QGroupBox("💾 Output Settings & Processing");
+    // Output settings and processing section with clean business styling
+    QGroupBox *processingGroup = new QGroupBox("Output Settings & Processing");
+    processingGroup->setStyleSheet(
+        "QGroupBox { "
+        "   font-size: 13px; "
+        "   font-weight: 600; "
+        "   color: #24292f; "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 6px; "
+        "   margin-top: 6px; "
+        "   background-color: #ffffff; "
+        "} "
+        "QGroupBox::title { "
+        "   subcontrol-origin: margin; "
+        "   subcontrol-position: top left; "
+        "   padding: 0 8px; "
+        "   background-color: #ffffff; "
+        "}"
+    );
     QVBoxLayout *processingLayout = new QVBoxLayout(processingGroup);
+    processingLayout->setSpacing(8);
+    processingLayout->setContentsMargins(12, 12, 12, 12);
     
     // Output postfix settings
     QHBoxLayout *postfixLayout = new QHBoxLayout();
-    postfixLayout->addWidget(new QLabel("Output File Postfix:"));
+    postfixLayout->setSpacing(8);
+    QLabel *postfixLabel = new QLabel("Output File Postfix:");
+    postfixLabel->setStyleSheet("font-size: 12px; font-weight: 500; color: #24292f;");
+    postfixLayout->addWidget(postfixLabel);
     m_postfixEdit = new QLineEdit(m_currentPostfix);
-    m_postfixEdit->setStyleSheet("border: 2px solid #FF9800; border-radius: 4px; padding: 4px;");
+    m_postfixEdit->setStyleSheet(
+        "QLineEdit { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   padding: 6px 8px; "
+        "   font-size: 12px; "
+        "   background-color: #ffffff; "
+        "   color: #24292f; "
+        "} "
+        "QLineEdit:focus { "
+        "   border-color: #0969da; "
+        "   outline: none; "
+        "}"
+    );
     m_postfixEdit->setToolTip("This will be added to each output filename (e.g., movie_merged.mp4)");
     postfixLayout->addWidget(m_postfixEdit);
     postfixLayout->addStretch();
     
     // Processing controls
     QHBoxLayout *buttonLayout = new QHBoxLayout();
-    m_startButton = new QPushButton("🚀 Start Batch Processing");
-    m_startButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:hover { background-color: #45a049; }");
+    buttonLayout->setSpacing(8);
+    m_startButton = new QPushButton("Start Batch Processing");
+    m_startButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #1f883d; "
+        "   border: 1px solid #1f883d; "
+        "   border-radius: 3px; "
+        "   color: #ffffff; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 8px 16px; "
+        "   min-width: 140px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #1a7f37; "
+        "   border-color: #1a7f37; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #166f2c; "
+        "} "
+        "QPushButton:disabled { "
+        "   background-color: #8c959f; "
+        "   border-color: #8c959f; "
+        "   color: #ffffff; "
+        "}"
+    );
     
-    m_stopButton = new QPushButton("⏹️ Stop Processing");
-    m_stopButton->setStyleSheet("QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:hover { background-color: #d32f2f; }");
+    m_stopButton = new QPushButton("Stop Processing");
+    m_stopButton->setStyleSheet(
+        "QPushButton { "
+        "   background-color: #cf222e; "
+        "   border: 1px solid #cf222e; "
+        "   border-radius: 3px; "
+        "   color: #ffffff; "
+        "   font-size: 12px; "
+        "   font-weight: 500; "
+        "   padding: 8px 16px; "
+        "   min-width: 120px; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: #b91c1c; "
+        "   border-color: #b91c1c; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: #9f1239; "
+        "} "
+        "QPushButton:disabled { "
+        "   background-color: #8c959f; "
+        "   border-color: #8c959f; "
+        "   color: #ffffff; "
+        "}"
+    );
     m_stopButton->setEnabled(false); // Initially disabled
     
     buttonLayout->addWidget(m_startButton);
@@ -216,16 +619,44 @@ void BatchProcessor::setupUI()
     buttonLayout->addStretch();
     
     m_progressBar = new QProgressBar();
+    m_progressBar->setStyleSheet(
+        "QProgressBar { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #f6f8fa; "
+        "   text-align: center; "
+        "   font-size: 12px; "
+        "   color: #24292f; "
+        "   height: 20px; "
+        "} "
+        "QProgressBar::chunk { "
+        "   background-color: #0969da; "
+        "   border-radius: 2px; "
+        "}"
+    );
+    
     m_logOutput = new QTextEdit();
     m_logOutput->setMaximumHeight(120);
     m_logOutput->setReadOnly(true);
-    m_logOutput->setStyleSheet("border: 1px solid #ccc; border-radius: 4px;");
+    m_logOutput->setStyleSheet(
+        "QTextEdit { "
+        "   border: 1px solid #d0d7de; "
+        "   border-radius: 3px; "
+        "   background-color: #ffffff; "
+        "   font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+        "   font-size: 11px; "
+        "   color: #24292f; "
+        "   padding: 8px; "
+        "}"
+    );
+    
+    QLabel *logLabel = new QLabel("Processing Log:");
+    logLabel->setStyleSheet("font-size: 12px; font-weight: 500; color: #24292f; margin-top: 8px;");
     
     processingLayout->addLayout(postfixLayout);
-    processingLayout->addWidget(new QLabel("")); // Spacer
     processingLayout->addLayout(buttonLayout);
     processingLayout->addWidget(m_progressBar);
-    processingLayout->addWidget(new QLabel("📄 Processing Log:"));
+    processingLayout->addWidget(logLabel);
     processingLayout->addWidget(m_logOutput);
     
     // Add all groups to main layout
@@ -546,7 +977,7 @@ void BatchProcessor::onStartBatchProcess()
         
         // Check for cancellation after processing events
         if (m_processingCancelled) {
-            m_logOutput->append("⚠️ Processing cancelled by user");
+            m_logOutput->append("Processing cancelled by user");
             break;
         }
         
@@ -585,9 +1016,9 @@ void BatchProcessor::onStartBatchProcess()
                                           selectedAudioTracks, selectedSubtitleTracks);
         
         if (success) {
-            m_logOutput->append("✓ Success - tracks merged");
+            m_logOutput->append("Success - tracks merged");
         } else {
-            m_logOutput->append("✗ Failed");
+            m_logOutput->append("Failed");
         }
         
         m_progressBar->setValue(i + 1);
@@ -604,13 +1035,13 @@ void BatchProcessor::onStartBatchProcess()
     m_stopButton->setEnabled(false);
     
     if (m_processingCancelled) {
-        m_logOutput->append("\n❌ Batch processing was cancelled!");
+        m_logOutput->append("\nBatch processing was cancelled!");
         QMessageBox::information(this, "Cancelled", 
                                 QString("Batch processing was cancelled!\nProcessed %1 out of %2 files.")
                                 .arg(m_progressBar->value())
                                 .arg(sourceFiles.size()));
     } else {
-        m_logOutput->append("\n✅ Batch processing completed!");
+        m_logOutput->append("\nBatch processing completed!");
         QMessageBox::information(this, "Completed", 
                                 QString("Batch processing completed!\nProcessed %1 files.")
                                 .arg(sourceFiles.size()));
@@ -621,7 +1052,7 @@ void BatchProcessor::onStopBatchProcess()
 {
     m_processingCancelled = true;
     m_stopButton->setEnabled(false);  // Disable to prevent multiple clicks
-    m_logOutput->append("🛑 Stopping batch processing...");
+    m_logOutput->append("Stopping batch processing...");
     QApplication::processEvents(); // Process the UI update immediately
 }
 
@@ -729,4 +1160,67 @@ void BatchProcessor::onClearSubtitleSelection()
     for (int i = 0; i < m_subtitleTracksList->count(); ++i) {
         m_subtitleTracksList->item(i)->setCheckState(Qt::Unchecked);
     }
+}
+
+void BatchProcessor::applyTheme()
+{
+    ThemeManager* theme = ThemeManager::instance();
+    
+    // Update all the widgets that we can access to use new theme colors
+    // This gives immediate theme switching without requiring restart
+    
+    // Update buttons
+    if (m_selectSourceButton) m_selectSourceButton->setStyleSheet(theme->buttonStyleSheet());
+    if (m_selectTargetButton) m_selectTargetButton->setStyleSheet(theme->buttonStyleSheet());
+    if (m_selectOutputButton) m_selectOutputButton->setStyleSheet(theme->buttonStyleSheet());
+    if (m_autoMatchButton) m_autoMatchButton->setStyleSheet(theme->primaryButtonStyleSheet());
+    if (m_moveUpButton) m_moveUpButton->setStyleSheet(theme->buttonStyleSheet());
+    if (m_moveDownButton) m_moveDownButton->setStyleSheet(theme->buttonStyleSheet());
+    if (m_startButton) m_startButton->setStyleSheet(theme->successButtonStyleSheet());
+    if (m_stopButton) m_stopButton->setStyleSheet(theme->dangerButtonStyleSheet());
+    
+    // Update input fields
+    if (m_sourceDirectoryEdit) m_sourceDirectoryEdit->setStyleSheet(theme->lineEditStyleSheet());
+    if (m_targetDirectoryEdit) m_targetDirectoryEdit->setStyleSheet(theme->lineEditStyleSheet());
+    if (m_outputDirectoryEdit) m_outputDirectoryEdit->setStyleSheet(theme->lineEditStyleSheet());
+    if (m_postfixEdit) m_postfixEdit->setStyleSheet(theme->lineEditStyleSheet());
+    if (m_audioTemplateEdit) m_audioTemplateEdit->setStyleSheet(theme->lineEditStyleSheet());
+    if (m_subtitleTemplateEdit) m_subtitleTemplateEdit->setStyleSheet(theme->lineEditStyleSheet());
+    
+    // Update lists
+    if (m_sourceFilesList) m_sourceFilesList->setStyleSheet(theme->listWidgetStyleSheet());
+    if (m_targetFilesList) m_targetFilesList->setStyleSheet(theme->listWidgetStyleSheet());
+    if (m_audioTracksList) m_audioTracksList->setStyleSheet(theme->listWidgetStyleSheet());
+    if (m_subtitleTracksList) m_subtitleTracksList->setStyleSheet(theme->listWidgetStyleSheet());
+    
+    // Update progress bar and text edit
+    if (m_progressBar) m_progressBar->setStyleSheet(theme->progressBarStyleSheet());
+    if (m_logOutput) m_logOutput->setStyleSheet(theme->textEditStyleSheet());
+    
+    // Update group boxes by finding them
+    QList<QGroupBox*> groupBoxes = findChildren<QGroupBox*>();
+    for (QGroupBox* groupBox : groupBoxes) {
+        groupBox->setStyleSheet(theme->groupBoxStyleSheet());
+    }
+    
+    // Update labels with secondary text color
+    QList<QLabel*> labels = findChildren<QLabel*>();
+    for (QLabel* label : labels) {
+        // Update specific labels that should use secondary text color
+        if (label->text().contains("Directory") || label->text().contains("Template:") || 
+            label->text().contains("Guide:") || label->text().contains("Log:")) {
+            QString currentStyle = label->styleSheet();
+            // Keep existing style but update color
+            if (currentStyle.contains("color:")) {
+                QRegularExpression colorRegex("color:\\s*[^;]+;");
+                QString newStyle = currentStyle.replace(colorRegex, QString("color: %1;").arg(theme->textColor()));
+                label->setStyleSheet(newStyle);
+            }
+        }
+    }
+}
+
+void BatchProcessor::onThemeChanged()
+{
+    applyTheme();
 }

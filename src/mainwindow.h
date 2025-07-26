@@ -15,6 +15,10 @@
 #include <QListWidget>
 #include <QGroupBox>
 #include <QCheckBox>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
+#include <QActionGroup>
 
 class VideoWidget;
 class VideoComparator;
@@ -44,13 +48,22 @@ private slots:
     void onSelectAllSubtitles();
     void onClearAudioSelection();
     void onClearSubtitleSelection();
+    
+    // Theme slots
+    void onThemeChanged();
+    void onSystemThemeTriggered();
+    void onLightThemeTriggered();
+    void onDarkThemeTriggered();
 
 private:
     void setupUI();
+    void setupMenuBar();
     void setupComparisonTab();
     void setupTransferTab();
     void setupBatchTab();
     void updateTrackLists();
+    void applyTheme();
+    void refreshTabStyling();
     QIcon createColoredIcon(const QColor &color, int size = 16);
 
     QTabWidget *m_tabWidget;
@@ -87,6 +100,14 @@ private:
     // Batch tab
     QWidget *m_batchTab;
     BatchProcessor *m_batchProcessor;
+    
+    // Theme menu
+    QMenu *m_viewMenu;
+    QMenu *m_themeMenu;
+    QActionGroup *m_themeActionGroup;
+    QAction *m_systemThemeAction;
+    QAction *m_lightThemeAction;
+    QAction *m_darkThemeAction;
 };
 
 #endif // MAINWINDOW_H

@@ -40,9 +40,11 @@ private slots:
     void onPlayPause();
     void onPositionChanged(qint64 position);
     void onDurationChanged(qint64 duration);
+    void onThemeChanged();
 
 private:
     void setupUI();
+    void applyTheme();
     
     QVBoxLayout *m_layout;
     QLabel *m_titleLabel;

@@ -27,6 +27,7 @@ set(SOURCES
     src/videocomparator.cpp
     src/ffmpeghandler.cpp
     src/batchprocessor.cpp
+    src/thememanager.cpp
 )
 
 set(HEADERS
@@ -35,6 +36,7 @@ set(HEADERS
     src/videocomparator.h
     src/ffmpeghandler.h
     src/batchprocessor.h
+    src/thememanager.h
 )
 
 add_executable(VideoMaster ${SOURCES} ${HEADERS})

@@ -3,6 +3,7 @@
 #include "videocomparator.h"
 #include "batchprocessor.h"
 #include "ffmpeghandler.h"
+#include "thememanager.h"
 #include <QApplication>
 #include <QMessageBox>
 #include <QFileDialog>
@@ -15,7 +16,14 @@ MainWindow::MainWindow(QWidget *parent)
     , m_comparator(new VideoComparator(this))
     , m_isPlaying(false)
 {
+    // Connect to theme manager
+    connect(ThemeManager::instance(), &ThemeManager::themeChanged,
+            this, &MainWindow::onThemeChanged);
+    
+    setupMenuBar();
     setupUI();
+    applyTheme();
+    
     setCentralWidget(m_tabWidget);
     setWindowTitle("VideoMaster - Video Comparison & Track Transfer Tool");
     resize(1200, 800);
@@ -36,34 +44,105 @@ void MainWindow::setupUI()
 
 void MainWindow::setupComparisonTab()
 {
+    ThemeManager* theme = ThemeManager::instance();
+    
     m_comparisonTab = new QWidget();
-    QVBoxLayout *layout = new QVBoxLayout(m_comparisonTab);
+    QVBoxLayout *mainLayout = new QVBoxLayout(m_comparisonTab);
+    mainLayout->setContentsMargins(12, 12, 12, 12);
+    mainLayout->setSpacing(8);
     
-    // Video widgets in splitter
+    // Video widgets in horizontal splitter - clean and simple
     QSplitter *videoSplitter = new QSplitter(Qt::Horizontal);
-    m_leftVideoWidget = new VideoWidget("Video A", this);
-    m_rightVideoWidget = new VideoWidget("Video B", this);
+    videoSplitter->setChildrenCollapsible(false);
     
-    videoSplitter->addWidget(m_leftVideoWidget);
-    videoSplitter->addWidget(m_rightVideoWidget);
-    videoSplitter->setSizes({600, 600});
+    // Left video - minimal styling
+    QWidget *leftContainer = new QWidget();
+    QVBoxLayout *leftLayout = new QVBoxLayout(leftContainer);
+    leftLayout->setContentsMargins(4, 4, 4, 4);
+    leftLayout->setSpacing(4);
     
-    // Controls
-    QHBoxLayout *controlsLayout = new QHBoxLayout();
+    QLabel *leftLabel = new QLabel("Video A");
+    leftLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1; padding: 2px;").arg(theme->secondaryTextColor()));
+    
+    m_leftVideoWidget = new VideoWidget("Drop video file here", this);
+    m_leftVideoWidget->setMinimumHeight(250);
+    
+    leftLayout->addWidget(leftLabel);
+    leftLayout->addWidget(m_leftVideoWidget, 1);
+    
+    // Right video - minimal styling
+    QWidget *rightContainer = new QWidget();
+    QVBoxLayout *rightLayout = new QVBoxLayout(rightContainer);
+    rightLayout->setContentsMargins(4, 4, 4, 4);
+    rightLayout->setSpacing(4);
+    
+    QLabel *rightLabel = new QLabel("Video B");
+    rightLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1; padding: 2px;").arg(theme->secondaryTextColor()));
+    
+    m_rightVideoWidget = new VideoWidget("Drop video file here", this);
+    m_rightVideoWidget->setMinimumHeight(250);
+    
+    rightLayout->addWidget(rightLabel);
+    rightLayout->addWidget(m_rightVideoWidget, 1);
+    
+    videoSplitter->addWidget(leftContainer);
+    videoSplitter->addWidget(rightContainer);
+    videoSplitter->setSizes({1, 1}); // Equal sizing
+    
+    // Control panel - clean business style
+    QWidget *controlPanel = new QWidget();
+    controlPanel->setStyleSheet(QString(
+        "QWidget { "
+        "   background-color: %1; "
+        "   border: 1px solid %2; "
+        "   border-radius: 4px; "
+        "}"
+    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+    QHBoxLayout *controlLayout = new QHBoxLayout(controlPanel);
+    controlLayout->setContentsMargins(12, 8, 12, 8);
+    controlLayout->setSpacing(12);
+    
+    // Sync button - standard business button
     m_syncButton = new QPushButton("Sync Playback", this);
+    m_syncButton->setMinimumWidth(100);
+    m_syncButton->setStyleSheet(theme->primaryButtonStyleSheet());
+    
+    // Timeline label
+    QLabel *timelineLabel = new QLabel("Timeline:");
+    timelineLabel->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
+    
+    // Timeline slider - clean business style
     m_timestampSlider = new QSlider(Qt::Horizontal, this);
-    m_timestampSlider->setEnabled(false); // Initially disabled until videos are loaded
-    m_timestampLabel = new QLabel("Timestamp: 00:00", this);
+    m_timestampSlider->setEnabled(false);
+    m_timestampSlider->setMinimumWidth(200);
+    m_timestampSlider->setStyleSheet(theme->sliderStyleSheet());
     
-    controlsLayout->addWidget(m_syncButton);
-    controlsLayout->addWidget(new QLabel("Seek to:"));
-    controlsLayout->addWidget(m_timestampSlider);
-    controlsLayout->addWidget(m_timestampLabel);
-    controlsLayout->addStretch();
+    // Timestamp display
+    m_timestampLabel = new QLabel("00:00");
+    m_timestampLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+        "   font-size: 13px; "
+        "   color: %1; "
+        "   background-color: %2; "
+        "   border: 1px solid %3; "
+        "   border-radius: 3px; "
+        "   padding: 4px 8px; "
+        "   min-width: 45px; "
+        "}"
+    ).arg(theme->textColor()).arg(theme->backgroundColor()).arg(theme->borderColor()));
+    m_timestampLabel->setAlignment(Qt::AlignCenter);
     
-    layout->addWidget(videoSplitter);
-    layout->addLayout(controlsLayout);
+    controlLayout->addWidget(m_syncButton);
+    controlLayout->addWidget(timelineLabel);
+    controlLayout->addWidget(m_timestampSlider, 1);
+    controlLayout->addWidget(m_timestampLabel);
     
+    // Assemble main layout
+    mainLayout->addWidget(videoSplitter, 1);
+    mainLayout->addWidget(controlPanel);
+    
+    // Connect signals
     connect(m_leftVideoWidget, &VideoWidget::videoLoaded, 
             [this](const QString &path) { onVideoLoaded(0, path); });
     connect(m_rightVideoWidget, &VideoWidget::videoLoaded, 
@@ -79,76 +158,132 @@ void MainWindow::setupComparisonTab()
 
 void MainWindow::setupTransferTab()
 {
+    ThemeManager* theme = ThemeManager::instance();
+    
     m_transferTab = new QWidget();
-    QVBoxLayout *layout = new QVBoxLayout(m_transferTab);
+    QVBoxLayout *mainLayout = new QVBoxLayout(m_transferTab);
+    mainLayout->setContentsMargins(12, 12, 12, 12);
+    mainLayout->setSpacing(12);
     
-    // Source and target video widgets with color coding
+    // Video selection area
     QHBoxLayout *videoLayout = new QHBoxLayout();
-    m_sourceVideoWidget = new VideoWidget("📁 Source Video (tracks to copy FROM)", this);
-    m_targetVideoWidget = new VideoWidget("🎯 Target Video (base video to copy TO)", this);
+    videoLayout->setSpacing(12);
     
-    // Add colored borders to make the connection clear
-    m_sourceVideoWidget->setStyleSheet(
-        "QWidget { border: 3px solid #4CAF50; border-radius: 8px; background-color: rgba(76, 175, 80, 0.1); }"
-        "QLabel { border: none; background-color: transparent; }"
-    );
-    m_targetVideoWidget->setStyleSheet(
-        "QWidget { border: 3px solid #2196F3; border-radius: 8px; background-color: rgba(33, 150, 243, 0.1); }"
-        "QLabel { border: none; background-color: transparent; }"
-    );
+    // Source video section
+    QWidget *sourceContainer = new QWidget();
+    sourceContainer->setStyleSheet(QString(
+        "QWidget { "
+        "   background-color: %1; "
+        "   border: 1px solid %2; "
+        "   border-radius: 6px; "
+        "   padding: 8px; "
+        "}"
+    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+    QVBoxLayout *sourceLayout = new QVBoxLayout(sourceContainer);
+    sourceLayout->setContentsMargins(4, 4, 4, 4);
+    sourceLayout->setSpacing(4);
     
-    videoLayout->addWidget(m_sourceVideoWidget);
-    videoLayout->addWidget(m_targetVideoWidget);
+    QLabel *sourceLabel = new QLabel("Source Video (tracks to copy from)");
+    sourceLabel->setStyleSheet(QString("font-size: 13px; font-weight: 500; color: %1;").arg(theme->textColor()));
     
-    // Track selection with templates
+    m_sourceVideoWidget = new VideoWidget("Drop source video here", this);
+    
+    sourceLayout->addWidget(sourceLabel);
+    sourceLayout->addWidget(m_sourceVideoWidget, 1);
+    
+    // Target video section  
+    QWidget *targetContainer = new QWidget();
+    targetContainer->setStyleSheet(QString(
+        "QWidget { "
+        "   background-color: %1; "
+        "   border: 1px solid %2; "
+        "   border-radius: 6px; "
+        "   padding: 8px; "
+        "}"
+    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+    QVBoxLayout *targetLayout = new QVBoxLayout(targetContainer);
+    targetLayout->setContentsMargins(4, 4, 4, 4);
+    targetLayout->setSpacing(4);
+    
+    QLabel *targetLabel = new QLabel("Target Video (base video to merge with)");
+    targetLabel->setStyleSheet(QString("font-size: 13px; font-weight: 500; color: %1;").arg(theme->textColor()));
+    
+    m_targetVideoWidget = new VideoWidget("Drop target video here", this);
+    
+    targetLayout->addWidget(targetLabel);
+    targetLayout->addWidget(m_targetVideoWidget, 1);
+    
+    videoLayout->addWidget(sourceContainer);
+    videoLayout->addWidget(targetContainer);
+    
+    // Track selection area
     QHBoxLayout *tracksLayout = new QHBoxLayout();
+    tracksLayout->setSpacing(12);
     
-    // Audio tracks section showing all tracks from both videos
-    QGroupBox *audioGroup = new QGroupBox("🎵 Audio Tracks Selection (check tracks to include in output)");
-    audioGroup->setStyleSheet("QGroupBox::title { color: #333; font-weight: bold; }");
+    // Audio tracks section
+    QGroupBox *audioGroup = new QGroupBox("Audio Tracks");
+    audioGroup->setStyleSheet(theme->groupBoxStyleSheet());
     QVBoxLayout *audioLayout = new QVBoxLayout(audioGroup);
     
     // Audio template controls
     QHBoxLayout *audioTemplateLayout = new QHBoxLayout();
-    audioTemplateLayout->addWidget(new QLabel("Template:"));
+    QLabel *audioTemplateLabel = new QLabel("Template:");
+    audioTemplateLabel->setStyleSheet(QString("font-size: 12px; color: %1;").arg(theme->secondaryTextColor()));
+    
     m_audioTemplateEdit = new QLineEdit("*eng*", this);
-    m_audioTemplateEdit->setPlaceholderText("e.g., *eng*, *jpn*, *deu*, *ac3*");
+    m_audioTemplateEdit->setPlaceholderText("e.g., *eng*, *jpn*, *ac3*");
+    m_audioTemplateEdit->setStyleSheet(theme->lineEditStyleSheet());
+    
     m_applyAudioTemplateButton = new QPushButton("Apply", this);
     m_selectAllAudioButton = new QPushButton("All", this);
     m_clearAudioButton = new QPushButton("Clear", this);
     
-    audioTemplateLayout->addWidget(m_audioTemplateEdit);
+    m_applyAudioTemplateButton->setStyleSheet(theme->buttonStyleSheet());
+    m_selectAllAudioButton->setStyleSheet(theme->buttonStyleSheet());
+    m_clearAudioButton->setStyleSheet(theme->buttonStyleSheet());
+    
+    audioTemplateLayout->addWidget(audioTemplateLabel);
+    audioTemplateLayout->addWidget(m_audioTemplateEdit, 1);
     audioTemplateLayout->addWidget(m_applyAudioTemplateButton);
     audioTemplateLayout->addWidget(m_selectAllAudioButton);
     audioTemplateLayout->addWidget(m_clearAudioButton);
     
     m_audioTracksList = new QListWidget();
-    m_audioTracksList->setToolTip("Check the audio tracks to include in the output video (from both source and target)");
+    m_audioTracksList->setStyleSheet(theme->listWidgetStyleSheet());
     
     audioLayout->addLayout(audioTemplateLayout);
     audioLayout->addWidget(m_audioTracksList);
     
-    // Subtitle tracks section showing all tracks from both videos
-    QGroupBox *subtitleGroup = new QGroupBox("💬 Subtitle Tracks Selection (check tracks to include in output)");
-    subtitleGroup->setStyleSheet("QGroupBox::title { color: #333; font-weight: bold; }");
+    // Subtitle tracks section
+    QGroupBox *subtitleGroup = new QGroupBox("Subtitle Tracks");
+    subtitleGroup->setStyleSheet(theme->groupBoxStyleSheet());
     QVBoxLayout *subtitleLayout = new QVBoxLayout(subtitleGroup);
     
     // Subtitle template controls
     QHBoxLayout *subtitleTemplateLayout = new QHBoxLayout();
-    subtitleTemplateLayout->addWidget(new QLabel("Template:"));
+    QLabel *subtitleTemplateLabel = new QLabel("Template:");
+    subtitleTemplateLabel->setStyleSheet(QString("font-size: 12px; color: %1;").arg(theme->secondaryTextColor()));
+    
     m_subtitleTemplateEdit = new QLineEdit("*eng*", this);
-    m_subtitleTemplateEdit->setPlaceholderText("e.g., *eng*, *jpn*, *deu*, *srt*");
+    m_subtitleTemplateEdit->setPlaceholderText("e.g., *eng*, *jpn*, *srt*");
+    m_subtitleTemplateEdit->setStyleSheet(theme->lineEditStyleSheet());
+    
     m_applySubtitleTemplateButton = new QPushButton("Apply", this);
     m_selectAllSubtitleButton = new QPushButton("All", this);
     m_clearSubtitleButton = new QPushButton("Clear", this);
     
-    subtitleTemplateLayout->addWidget(m_subtitleTemplateEdit);
+    m_applySubtitleTemplateButton->setStyleSheet(theme->buttonStyleSheet());
+    m_selectAllSubtitleButton->setStyleSheet(theme->buttonStyleSheet());
+    m_clearSubtitleButton->setStyleSheet(theme->buttonStyleSheet());
+    
+    subtitleTemplateLayout->addWidget(subtitleTemplateLabel);
+    subtitleTemplateLayout->addWidget(m_subtitleTemplateEdit, 1);
     subtitleTemplateLayout->addWidget(m_applySubtitleTemplateButton);
     subtitleTemplateLayout->addWidget(m_selectAllSubtitleButton);
     subtitleTemplateLayout->addWidget(m_clearSubtitleButton);
     
     m_subtitleTracksList = new QListWidget();
-    m_subtitleTracksList->setToolTip("Check the subtitle tracks to include in the output video (from both source and target)");
+    m_subtitleTracksList->setStyleSheet(theme->listWidgetStyleSheet());
     
     subtitleLayout->addLayout(subtitleTemplateLayout);
     subtitleLayout->addWidget(m_subtitleTracksList);
@@ -156,45 +291,39 @@ void MainWindow::setupTransferTab()
     tracksLayout->addWidget(audioGroup);
     tracksLayout->addWidget(subtitleGroup);
     
-    // Add visual legend explaining the new merge approach
-    QHBoxLayout *legendLayout = new QHBoxLayout();
-    QLabel *legendLabel = new QLabel("📖 Track Selection Guide:");
-    legendLabel->setStyleSheet("font-weight: bold; font-size: 12px;");
-    
-    QLabel *sourceColorLabel = new QLabel();
-    sourceColorLabel->setPixmap(createColoredIcon(QColor("#4CAF50"), 16).pixmap(16, 16));
-    QLabel *sourceTextLabel = new QLabel("📁 Source tracks (unchecked by default - check to ADD)");
-    sourceTextLabel->setStyleSheet("color: #4CAF50; font-weight: bold;");
-    
-    QLabel *targetColorLabel = new QLabel();
-    targetColorLabel->setPixmap(createColoredIcon(QColor("#2196F3"), 16).pixmap(16, 16));
-    QLabel *targetTextLabel = new QLabel("🎯 Target tracks (checked by default - uncheck to REMOVE)");
-    targetTextLabel->setStyleSheet("color: #2196F3; font-weight: bold;");
-    
-    legendLayout->addWidget(legendLabel);
-    legendLayout->addWidget(sourceColorLabel);
-    legendLayout->addWidget(sourceTextLabel);
-    legendLayout->addWidget(new QLabel("  |  "));
-    legendLayout->addWidget(targetColorLabel);
-    legendLayout->addWidget(targetTextLabel);
-    legendLayout->addStretch();
-    
     // Transfer controls
-    QHBoxLayout *transferLayout = new QHBoxLayout();
-    transferLayout->addWidget(new QLabel("Output Postfix:"));
+    QWidget *transferPanel = new QWidget();
+    transferPanel->setStyleSheet(QString(
+        "QWidget { "
+        "   background-color: %1; "
+        "   border: 1px solid %2; "
+        "   border-radius: 6px; "
+        "}"
+    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+    QHBoxLayout *transferLayout = new QHBoxLayout(transferPanel);
+    transferLayout->setContentsMargins(12, 8, 12, 8);
+    
+    QLabel *postfixLabel = new QLabel("Output Postfix:");
+    postfixLabel->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
+    
     m_postfixEdit = new QLineEdit("_merged", this);
+    m_postfixEdit->setMinimumWidth(100);
+    m_postfixEdit->setStyleSheet(theme->lineEditStyleSheet());
+    
     m_transferButton = new QPushButton("Transfer Selected Tracks", this);
+    m_transferButton->setStyleSheet(theme->primaryButtonStyleSheet());
     
+    transferLayout->addWidget(postfixLabel);
     transferLayout->addWidget(m_postfixEdit);
-    transferLayout->addWidget(m_transferButton);
     transferLayout->addStretch();
+    transferLayout->addWidget(m_transferButton);
     
-    layout->addLayout(videoLayout);
-    layout->addLayout(tracksLayout);
-    layout->addLayout(legendLayout);
-    layout->addLayout(transferLayout);
+    // Assemble main layout
+    mainLayout->addLayout(videoLayout, 1);
+    mainLayout->addLayout(tracksLayout, 1);
+    mainLayout->addWidget(transferPanel);
     
-    // Connect all the signals
+    // Connect signals
     connect(m_transferButton, &QPushButton::clicked, this, &MainWindow::onTransferTracks);
     connect(m_postfixEdit, &QLineEdit::textChanged, this, &MainWindow::onPostfixChanged);
     
@@ -206,7 +335,7 @@ void MainWindow::setupTransferTab()
     connect(m_clearAudioButton, &QPushButton::clicked, this, &MainWindow::onClearAudioSelection);
     connect(m_clearSubtitleButton, &QPushButton::clicked, this, &MainWindow::onClearSubtitleSelection);
     
-    // Connect both video loading events to track list updates
+    // Connect video loading events
     connect(m_sourceVideoWidget, &VideoWidget::videoLoaded, this, [this](const QString &path) {
         updateTrackLists();
     });
@@ -573,5 +702,137 @@ QIcon MainWindow::createColoredIcon(const QColor &color, int size)
     painter.drawRoundedRect(1, 1, size-2, size-2, 3, 3);
     
     return QIcon(pixmap);
+}
+
+void MainWindow::setupMenuBar()
+{
+    // Create View menu
+    m_viewMenu = menuBar()->addMenu("&View");
+    
+    // Create Theme submenu
+    m_themeMenu = m_viewMenu->addMenu("&Theme");
+    
+    // Create theme action group for exclusive selection
+    m_themeActionGroup = new QActionGroup(this);
+    
+    // System theme action
+    m_systemThemeAction = new QAction("&System", this);
+    m_systemThemeAction->setCheckable(true);
+    m_systemThemeAction->setActionGroup(m_themeActionGroup);
+    connect(m_systemThemeAction, &QAction::triggered, this, &MainWindow::onSystemThemeTriggered);
+    m_themeMenu->addAction(m_systemThemeAction);
+    
+    // Light theme action
+    m_lightThemeAction = new QAction("&Light", this);
+    m_lightThemeAction->setCheckable(true);
+    m_lightThemeAction->setActionGroup(m_themeActionGroup);
+    connect(m_lightThemeAction, &QAction::triggered, this, &MainWindow::onLightThemeTriggered);
+    m_themeMenu->addAction(m_lightThemeAction);
+    
+    // Dark theme action
+    m_darkThemeAction = new QAction("&Dark", this);
+    m_darkThemeAction->setCheckable(true);
+    m_darkThemeAction->setActionGroup(m_themeActionGroup);
+    connect(m_darkThemeAction, &QAction::triggered, this, &MainWindow::onDarkThemeTriggered);
+    m_themeMenu->addAction(m_darkThemeAction);
+    
+    // Set initial checked state based on current theme
+    ThemeManager::Theme currentTheme = ThemeManager::instance()->currentTheme();
+    switch (currentTheme) {
+        case ThemeManager::System:
+            m_systemThemeAction->setChecked(true);
+            break;
+        case ThemeManager::Light:
+            m_lightThemeAction->setChecked(true);
+            break;
+        case ThemeManager::Dark:
+            m_darkThemeAction->setChecked(true);
+            break;
+    }
+}
+
+void MainWindow::applyTheme()
+{
+    // Apply theme to main window and tabs
+    setStyleSheet(ThemeManager::instance()->tabWidgetStyleSheet());
+    
+    // Refresh individual tab styling by re-calling setup methods
+    // This ensures all widgets get updated with new theme colors
+    refreshTabStyling();
+    
+    // Explicitly update BatchProcessor theme
+    if (m_batchProcessor) {
+        m_batchProcessor->applyTheme();
+    }
+}
+
+void MainWindow::refreshTabStyling()
+{
+    // We can't easily re-setup all tabs without destroying the content,
+    // but we can update the critical styling elements that use theme colors
+    ThemeManager* theme = ThemeManager::instance();
+    
+    // Update comparison tab labels if they exist
+    if (m_comparisonTab) {
+        // Find and update labels in comparison tab
+        QList<QLabel*> labels = m_comparisonTab->findChildren<QLabel*>();
+        for (QLabel* label : labels) {
+            if (label->text() == "Video A" || label->text() == "Video B") {
+                label->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1; padding: 2px;").arg(theme->secondaryTextColor()));
+            } else if (label->text() == "Timeline:") {
+                label->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
+            }
+        }
+        
+        // Update control panel
+        QList<QWidget*> widgets = m_comparisonTab->findChildren<QWidget*>("controlPanel");
+        for (QWidget* widget : widgets) {
+            widget->setStyleSheet(QString(
+                "QWidget { "
+                "   background-color: %1; "
+                "   border: 1px solid %2; "
+                "   border-radius: 4px; "
+                "}"
+            ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+        }
+        
+        // Update sync button and timestamp label
+        if (m_syncButton) m_syncButton->setStyleSheet(theme->primaryButtonStyleSheet());
+        if (m_timestampSlider) m_timestampSlider->setStyleSheet(theme->sliderStyleSheet());
+        if (m_timestampLabel) {
+            m_timestampLabel->setStyleSheet(QString(
+                "QLabel { "
+                "   font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+                "   font-size: 13px; "
+                "   color: %1; "
+                "   background-color: %2; "
+                "   border: 1px solid %3; "
+                "   border-radius: 3px; "
+                "   padding: 4px 8px; "
+                "   min-width: 45px; "
+                "}"
+            ).arg(theme->textColor()).arg(theme->backgroundColor()).arg(theme->borderColor()));
+        }
+    }
+}
+
+void MainWindow::onThemeChanged()
+{
+    applyTheme();
+}
+
+void MainWindow::onSystemThemeTriggered()
+{
+    ThemeManager::instance()->setTheme(ThemeManager::System);
+}
+
+void MainWindow::onLightThemeTriggered()
+{
+    ThemeManager::instance()->setTheme(ThemeManager::Light);
+}
+
+void MainWindow::onDarkThemeTriggered()
+{
+    ThemeManager::instance()->setTheme(ThemeManager::Dark);
 }
 

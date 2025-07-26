@@ -67,15 +67,35 @@ cd build
 ```
 
 ### Video Comparison Tab
-1. Drag and drop two video files into the left and right video areas
-2. Use the "Sync Playback" button to play both videos simultaneously
-   - Button toggles between "Sync Playback" and "Sync Pause"
-   - Controls both videos together - play together, pause together
-3. Use the timestamp slider to jump to specific points in both videos
-   - Slider becomes active when videos are loaded
-   - Immediately seeks both videos when moved
-   - Updates in real-time during playback
-4. The application will analyze visual differences between the videos
+**Clean, professional business application design:**
+
+1. **Modern Business Styling:**
+   - **GitHub-inspired color palette** with subtle grays and professional blue accents
+   - **Clean, minimal design** following modern Qt application standards
+   - **Consistent typography** and spacing throughout
+
+2. **Side-by-Side Layout:**
+   - **QSplitter-based design** for resizable video areas
+   - **Simple labels** with professional gray text
+   - **Clean drop zones** with subtle dashed borders
+
+3. **Professional Control Panel:**
+   - **Compact horizontal layout** with proper spacing
+   - **Standard button styling** with GitHub-blue primary color
+   - **Clean timeline slider** with professional appearance
+   - **Monospace timestamp display** in bordered container
+
+4. **Business Application Standards:**
+   - **Subtle backgrounds** (#f8f9fa) for panels
+   - **Professional borders** (#d0d7de) for definition
+   - **Standard button sizes** and padding
+   - **Consistent hover and focus states**
+
+5. **Clean Video Widgets:**
+   - **Minimal individual controls** on each video
+   - **Professional drop areas** with appropriate contrast
+   - **Standard button styling** for play controls
+   - **Clean slider design** for individual video seeking
 
 ### Track Transfer Tab
 1. **Load Videos:**

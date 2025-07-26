@@ -882,6 +882,90 @@ void MainWindow::refreshTabStyling()
             ).arg(theme->textColor()).arg(theme->backgroundColor()).arg(theme->borderColor()));
         }
     }
+    
+    // Update Track Transfer tab styling
+    if (m_transferTab) {
+        // Update source and target container styling
+        QList<QWidget*> containers = m_transferTab->findChildren<QWidget*>();
+        for (QWidget* container : containers) {
+            // Check if this is a source or target container by checking its parent layout
+            QVBoxLayout* parentLayout = qobject_cast<QVBoxLayout*>(container->layout());
+            if (parentLayout && (parentLayout->count() >= 2)) {
+                QLabel* label = qobject_cast<QLabel*>(parentLayout->itemAt(0)->widget());
+                if (label && (label->text().contains("Source Video") || label->text().contains("Target Video"))) {
+                    container->setStyleSheet(QString(
+                        "QWidget { "
+                        "   background-color: %1; "
+                        "   border: 1px solid %2; "
+                        "   border-radius: 6px; "
+                        "   padding: 8px; "
+                        "}"
+                    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+                }
+            }
+        }
+        
+        // Update labels in Transfer tab
+        QList<QLabel*> transferLabels = m_transferTab->findChildren<QLabel*>();
+        for (QLabel* label : transferLabels) {
+            if (label->text().contains("Source Video") || label->text().contains("Target Video")) {
+                label->setStyleSheet(QString("font-size: 13px; font-weight: 500; color: %1;").arg(theme->textColor()));
+            } else if (label->text() == "Template:") {
+                label->setStyleSheet(QString("font-size: 12px; color: %1;").arg(theme->secondaryTextColor()));
+            } else if (label->text() == "Output Postfix:") {
+                label->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
+            }
+        }
+        
+        // Update all buttons in Transfer tab
+        if (m_applyAudioTemplateButton) m_applyAudioTemplateButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_selectAllAudioButton) m_selectAllAudioButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_clearAudioButton) m_clearAudioButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_applySubtitleTemplateButton) m_applySubtitleTemplateButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_selectAllSubtitleButton) m_selectAllSubtitleButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_clearSubtitleButton) m_clearSubtitleButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_transferButton) m_transferButton->setStyleSheet(theme->primaryButtonStyleSheet());
+        
+        // Update line edits
+        if (m_audioTemplateEdit) m_audioTemplateEdit->setStyleSheet(theme->lineEditStyleSheet());
+        if (m_subtitleTemplateEdit) m_subtitleTemplateEdit->setStyleSheet(theme->lineEditStyleSheet());
+        if (m_postfixEdit) m_postfixEdit->setStyleSheet(theme->lineEditStyleSheet());
+        
+        // Update list widgets
+        if (m_audioTracksList) m_audioTracksList->setStyleSheet(theme->listWidgetStyleSheet());
+        if (m_subtitleTracksList) m_subtitleTracksList->setStyleSheet(theme->listWidgetStyleSheet());
+        
+        // Update group boxes - find and update them
+        QList<QGroupBox*> groupBoxes = m_transferTab->findChildren<QGroupBox*>();
+        for (QGroupBox* groupBox : groupBoxes) {
+            groupBox->setStyleSheet(theme->groupBoxStyleSheet());
+        }
+        
+        // Update transfer panel
+        QList<QWidget*> transferPanels = m_transferTab->findChildren<QWidget*>();
+        for (QWidget* panel : transferPanels) {
+            // Look for the transfer panel by checking if it contains the postfix edit
+            if (panel && panel->layout()) {
+                QHBoxLayout* hLayout = qobject_cast<QHBoxLayout*>(panel->layout());
+                if (hLayout && hLayout->count() >= 3) {
+                    // Check if this layout contains our postfix controls
+                    for (int i = 0; i < hLayout->count(); ++i) {
+                        QWidget* widget = hLayout->itemAt(i)->widget();
+                        if (widget == m_postfixEdit) {
+                            panel->setStyleSheet(QString(
+                                "QWidget { "
+                                "   background-color: %1; "
+                                "   border: 1px solid %2; "
+                                "   border-radius: 6px; "
+                                "}"
+                            ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 void MainWindow::onThemeChanged()

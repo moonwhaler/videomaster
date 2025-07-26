@@ -1,6 +1,7 @@
 #include "videowidget.h"
 #include <QFileInfo>
 #include <QTime>
+#include <QCoreApplication>
 
 VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     : QWidget(parent)
@@ -85,6 +86,16 @@ void VideoWidget::loadVideo(const QString &filePath)
     QFileInfo fileInfo(filePath);
     m_titleLabel->setText(fileInfo.fileName());
     
+    // Brief play/pause to ensure media is ready for seeking
+    connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::LoadedMedia) {
+            // Media is fully loaded and ready for seeking
+            m_mediaPlayer->play();
+            m_mediaPlayer->pause();
+            disconnect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged, this, nullptr);
+        }
+    });
+    
     emit videoLoaded(filePath);
 }
 
@@ -102,6 +113,20 @@ void VideoWidget::pause()
 
 void VideoWidget::seek(qint64 position)
 {
+    // Ensure media player is in a seekable state
+    if (m_mediaPlayer->mediaStatus() == QMediaPlayer::NoMedia || 
+        m_mediaPlayer->mediaStatus() == QMediaPlayer::InvalidMedia) {
+        return;
+    }
+    
+    // If the player is stopped, we need to prepare it for seeking
+    if (m_mediaPlayer->playbackState() == QMediaPlayer::StoppedState) {
+        // Temporarily start playback to enable seeking, then immediately pause
+        m_mediaPlayer->play();
+        QCoreApplication::processEvents(); // Allow the play state to be processed
+        m_mediaPlayer->pause();
+    }
+    
     m_mediaPlayer->setPosition(position);
 }
 

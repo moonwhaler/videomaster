@@ -17,6 +17,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_tabWidget(new QTabWidget(this))
     , m_comparator(new VideoComparator(this))
     , m_isPlaying(false)
+    , m_currentChapterIndex(-1)
     , m_transferThread(nullptr)
     , m_transferWorker(nullptr)
 {
@@ -192,9 +193,86 @@ void MainWindow::setupComparisonTab()
     resultsLayout->addWidget(m_comparisonProgressBar);
     resultsLayout->addWidget(m_comparisonResultLabel);
     
+    // Chapter navigation area
+    QWidget *chapterPanel = new QWidget();
+    chapterPanel->setStyleSheet(QString(
+        "QWidget { "
+        "   background-color: %1; "
+        "   border: 1px solid %2; "
+        "   border-radius: 4px; "
+        "}"
+    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+    QHBoxLayout *chapterLayout = new QHBoxLayout(chapterPanel);
+    chapterLayout->setContentsMargins(12, 8, 12, 8);
+    chapterLayout->setSpacing(12);
+    
+    // Left video chapters
+    QVBoxLayout *leftChapterLayout = new QVBoxLayout();
+    QLabel *leftChapterLabel = new QLabel("Video A Chapters");
+    leftChapterLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1;").arg(theme->textColor()));
+    leftChapterLabel->setAlignment(Qt::AlignCenter);
+    
+    m_leftChaptersList = new QListWidget();
+    m_leftChaptersList->setMaximumHeight(120);
+    m_leftChaptersList->setStyleSheet(theme->listWidgetStyleSheet());
+    
+    leftChapterLayout->addWidget(leftChapterLabel);
+    leftChapterLayout->addWidget(m_leftChaptersList);
+    
+    // Chapter navigation controls
+    QVBoxLayout *chapterControlsLayout = new QVBoxLayout();
+    
+    m_currentChapterLabel = new QLabel("No chapters");
+    m_currentChapterLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-size: 12px; "
+        "   color: %1; "
+        "   padding: 4px; "
+        "   background-color: transparent; "
+        "   border: none; "
+        "   font-weight: 500; "
+        "}"
+    ).arg(theme->textColor()));
+    m_currentChapterLabel->setAlignment(Qt::AlignCenter);
+    m_currentChapterLabel->setWordWrap(true);
+    
+    QHBoxLayout *navButtonsLayout = new QHBoxLayout();
+    m_prevChapterButton = new QPushButton("◄ Prev", this);
+    m_nextChapterButton = new QPushButton("Next ►", this);
+    
+    m_prevChapterButton->setEnabled(false);
+    m_nextChapterButton->setEnabled(false);
+    m_prevChapterButton->setStyleSheet(theme->buttonStyleSheet());
+    m_nextChapterButton->setStyleSheet(theme->buttonStyleSheet());
+    
+    navButtonsLayout->addWidget(m_prevChapterButton);
+    navButtonsLayout->addWidget(m_nextChapterButton);
+    
+    chapterControlsLayout->addWidget(m_currentChapterLabel);
+    chapterControlsLayout->addLayout(navButtonsLayout);
+    chapterControlsLayout->addStretch();
+    
+    // Right video chapters
+    QVBoxLayout *rightChapterLayout = new QVBoxLayout();
+    QLabel *rightChapterLabel = new QLabel("Video B Chapters");
+    rightChapterLabel->setStyleSheet(QString("font-size: 12px; font-weight: 500; color: %1;").arg(theme->textColor()));
+    rightChapterLabel->setAlignment(Qt::AlignCenter);
+    
+    m_rightChaptersList = new QListWidget();
+    m_rightChaptersList->setMaximumHeight(120);
+    m_rightChaptersList->setStyleSheet(theme->listWidgetStyleSheet());
+    
+    rightChapterLayout->addWidget(rightChapterLabel);
+    rightChapterLayout->addWidget(m_rightChaptersList);
+    
+    chapterLayout->addLayout(leftChapterLayout, 1);
+    chapterLayout->addLayout(chapterControlsLayout);
+    chapterLayout->addLayout(rightChapterLayout, 1);
+    
     // Assemble main layout
     mainLayout->addWidget(videoSplitter, 1);
     mainLayout->addWidget(controlPanel);
+    mainLayout->addWidget(chapterPanel);
     mainLayout->addWidget(resultsPanel);
     
     // Connect signals
@@ -214,6 +292,12 @@ void MainWindow::setupComparisonTab()
     // Connect video comparator signals for auto comparison
     connect(m_comparator, &VideoComparator::comparisonProgress, this, &MainWindow::onComparisonProgress);
     connect(m_comparator, &VideoComparator::autoComparisonComplete, this, &MainWindow::onAutoComparisonComplete);
+    
+    // Connect chapter navigation signals
+    connect(m_leftChaptersList, &QListWidget::itemClicked, this, &MainWindow::onChapterSelected);
+    connect(m_rightChaptersList, &QListWidget::itemClicked, this, &MainWindow::onChapterSelected);
+    connect(m_prevChapterButton, &QPushButton::clicked, this, &MainWindow::onPreviousChapter);
+    connect(m_nextChapterButton, &QPushButton::clicked, this, &MainWindow::onNextChapter);
 }
 
 void MainWindow::setupTransferTab()
@@ -435,6 +519,9 @@ void MainWindow::onVideoLoaded(int playerIndex, const QString &filePath)
         m_timestampSlider->setRange(0, duration);
         m_timestampSlider->setEnabled(true);
     }
+    
+    // Update chapter information
+    updateChapterLists();
 }
 
 void MainWindow::onSyncPlayback()
@@ -491,6 +578,9 @@ void MainWindow::onVideoPositionChanged(qint64 position)
         // Update timestamp label
         QTime time = QTime::fromMSecsSinceStartOfDay(position);
         m_timestampLabel->setText(QString("Timestamp: %1").arg(time.toString("mm:ss")));
+        
+        // Update current chapter display
+        updateCurrentChapterDisplay(position);
     }
 }
 
@@ -915,6 +1005,10 @@ void MainWindow::refreshTabStyling()
         if (m_syncButton) m_syncButton->setStyleSheet(theme->primaryButtonStyleSheet());
         if (m_autoCompareButton) m_autoCompareButton->setStyleSheet(theme->successButtonStyleSheet());
         if (m_comparisonProgressBar) m_comparisonProgressBar->setStyleSheet(theme->progressBarStyleSheet());
+        if (m_prevChapterButton) m_prevChapterButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_nextChapterButton) m_nextChapterButton->setStyleSheet(theme->buttonStyleSheet());
+        if (m_leftChaptersList) m_leftChaptersList->setStyleSheet(theme->listWidgetStyleSheet());
+        if (m_rightChaptersList) m_rightChaptersList->setStyleSheet(theme->listWidgetStyleSheet());
         if (m_timestampSlider) m_timestampSlider->setStyleSheet(theme->sliderStyleSheet());
         if (m_timestampLabel) {
             m_timestampLabel->setStyleSheet(QString(
@@ -1115,5 +1209,171 @@ void MainWindow::onAutoComparisonComplete(double overallSimilarity, bool videosI
         "   font-weight: 500; "
         "}"
     ).arg(resultColor));
+}
+
+void MainWindow::updateChapterLists()
+{
+    FFmpegHandler handler;
+    
+    // Clear existing chapters
+    m_leftChaptersList->clear();
+    m_rightChaptersList->clear();
+    m_leftVideoChapters.clear();
+    m_rightVideoChapters.clear();
+    
+    // Load chapters for left video
+    QString leftPath = m_leftVideoWidget->currentFilePath();
+    if (!leftPath.isEmpty()) {
+        m_leftVideoChapters = handler.getChapters(leftPath);
+        for (const ChapterInfo &chapter : m_leftVideoChapters) {
+            QListWidgetItem *item = new QListWidgetItem();
+            item->setText(QString("%1 - %2").arg(chapter.formattedTime).arg(chapter.title));
+            item->setData(Qt::UserRole, chapter.startTimeMs);
+            item->setToolTip(QString("Jump to %1").arg(chapter.title));
+            m_leftChaptersList->addItem(item);
+        }
+    }
+    
+    // Load chapters for right video
+    QString rightPath = m_rightVideoWidget->currentFilePath();
+    if (!rightPath.isEmpty()) {
+        m_rightVideoChapters = handler.getChapters(rightPath);
+        for (const ChapterInfo &chapter : m_rightVideoChapters) {
+            QListWidgetItem *item = new QListWidgetItem();
+            item->setText(QString("%1 - %2").arg(chapter.formattedTime).arg(chapter.title));
+            item->setData(Qt::UserRole, chapter.startTimeMs);
+            item->setToolTip(QString("Jump to %1").arg(chapter.title));
+            m_rightChaptersList->addItem(item);
+        }
+    }
+    
+    // Update navigation state
+    updateChapterNavigation();
+}
+
+void MainWindow::onChapterSelected()
+{
+    QListWidget *senderList = qobject_cast<QListWidget*>(sender());
+    if (!senderList) return;
+    
+    QListWidgetItem *selectedItem = senderList->currentItem();
+    if (!selectedItem) return;
+    
+    qint64 timestamp = selectedItem->data(Qt::UserRole).toLongLong();
+    
+    // Seek both videos to the chapter timestamp
+    if (!m_leftVideoWidget->currentFilePath().isEmpty()) {
+        m_leftVideoWidget->seek(timestamp);
+    }
+    if (!m_rightVideoWidget->currentFilePath().isEmpty()) {
+        m_rightVideoWidget->seek(timestamp);
+    }
+    
+    // Update timestamp slider
+    m_timestampSlider->setValue(timestamp);
+    
+    // Update current chapter display
+    updateCurrentChapterDisplay(timestamp);
+}
+
+void MainWindow::onPreviousChapter()
+{
+    if (m_currentChapterIndex <= 0) return;
+    
+    m_currentChapterIndex--;
+    jumpToCurrentChapter();
+}
+
+void MainWindow::onNextChapter()
+{
+    // Find the maximum available chapters between both videos
+    int maxChapters = qMax(m_leftVideoChapters.size(), m_rightVideoChapters.size());
+    
+    if (m_currentChapterIndex >= maxChapters - 1) return;
+    
+    m_currentChapterIndex++;
+    jumpToCurrentChapter();
+}
+
+void MainWindow::jumpToCurrentChapter()
+{
+    if (m_currentChapterIndex < 0) return;
+    
+    qint64 timestamp = 0;
+    
+    // Prefer left video chapters, fall back to right video chapters
+    if (m_currentChapterIndex < m_leftVideoChapters.size()) {
+        timestamp = m_leftVideoChapters[m_currentChapterIndex].startTimeMs;
+    } else if (m_currentChapterIndex < m_rightVideoChapters.size()) {
+        timestamp = m_rightVideoChapters[m_currentChapterIndex].startTimeMs;
+    } else {
+        return; // No valid chapter
+    }
+    
+    // Seek both videos
+    if (!m_leftVideoWidget->currentFilePath().isEmpty()) {
+        m_leftVideoWidget->seek(timestamp);
+    }
+    if (!m_rightVideoWidget->currentFilePath().isEmpty()) {
+        m_rightVideoWidget->seek(timestamp);
+    }
+    
+    // Update timestamp slider
+    m_timestampSlider->setValue(timestamp);
+    
+    // Update display
+    updateCurrentChapterDisplay(timestamp);
+    updateChapterNavigation();
+}
+
+void MainWindow::updateCurrentChapterDisplay(qint64 currentTimestamp)
+{
+    QString chapterText = "No chapters";
+    
+    // Find current chapter in left video
+    for (int i = 0; i < m_leftVideoChapters.size(); ++i) {
+        const ChapterInfo &chapter = m_leftVideoChapters[i];
+        if (currentTimestamp >= chapter.startTimeMs && 
+            (i == m_leftVideoChapters.size() - 1 || currentTimestamp < m_leftVideoChapters[i + 1].startTimeMs)) {
+            chapterText = QString("A: %1").arg(chapter.title);
+            m_currentChapterIndex = i;
+            break;
+        }
+    }
+    
+    // Also check right video chapters
+    QString rightChapterText;
+    for (int i = 0; i < m_rightVideoChapters.size(); ++i) {
+        const ChapterInfo &chapter = m_rightVideoChapters[i];
+        if (currentTimestamp >= chapter.startTimeMs && 
+            (i == m_rightVideoChapters.size() - 1 || currentTimestamp < m_rightVideoChapters[i + 1].startTimeMs)) {
+            rightChapterText = QString("B: %1").arg(chapter.title);
+            if (chapterText == "No chapters") {
+                chapterText = rightChapterText;
+                m_currentChapterIndex = i;
+            } else {
+                chapterText += QString("\n%1").arg(rightChapterText);
+            }
+            break;
+        }
+    }
+    
+    m_currentChapterLabel->setText(chapterText);
+    updateChapterNavigation();
+}
+
+void MainWindow::updateChapterNavigation()
+{
+    int maxChapters = qMax(m_leftVideoChapters.size(), m_rightVideoChapters.size());
+    
+    if (maxChapters == 0) {
+        m_prevChapterButton->setEnabled(false);
+        m_nextChapterButton->setEnabled(false);
+        m_currentChapterLabel->setText("No chapters");
+        return;
+    }
+    
+    m_prevChapterButton->setEnabled(m_currentChapterIndex > 0);
+    m_nextChapterButton->setEnabled(m_currentChapterIndex < maxChapters - 1);
 }
 

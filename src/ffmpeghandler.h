@@ -29,6 +29,14 @@ struct SubtitleTrackInfo {
     QString title;
 };
 
+struct ChapterInfo {
+    int index;
+    QString title;
+    qint64 startTimeMs;
+    qint64 endTimeMs;
+    QString formattedTime;
+};
+
 class FFmpegHandler
 {
 public:
@@ -42,6 +50,9 @@ public:
     // Track information
     QList<AudioTrackInfo> getAudioTracks(const QString &filePath);
     QList<SubtitleTrackInfo> getSubtitleTracks(const QString &filePath);
+    
+    // Chapter information
+    QList<ChapterInfo> getChapters(const QString &filePath);
     
     // Track transfer operations
     bool transferTracks(const QString &sourceFile, 

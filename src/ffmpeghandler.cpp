@@ -343,6 +343,77 @@ bool FFmpegHandler::batchTransferTracks(const QStringList &sourceFiles,
     return allSuccessful;
 }
 
+QList<ChapterInfo> FFmpegHandler::getChapters(const QString &filePath)
+{
+    QList<ChapterInfo> chapters;
+    
+    AVFormatContext *formatContext = openVideoFile(filePath);
+    if (!formatContext) {
+        return chapters;
+    }
+    
+    // Extract chapters from the format context
+    for (unsigned int i = 0; i < formatContext->nb_chapters; i++) {
+        AVChapter *chapter = formatContext->chapters[i];
+        ChapterInfo chapterInfo;
+        
+        chapterInfo.index = i;
+        
+        // Convert timestamps from chapter timebase to milliseconds
+        AVRational timebase = chapter->time_base;
+        chapterInfo.startTimeMs = av_rescale_q(chapter->start, timebase, AVRational{1, 1000});
+        chapterInfo.endTimeMs = av_rescale_q(chapter->end, timebase, AVRational{1, 1000});
+        
+        // Format time as MM:SS or HH:MM:SS
+        qint64 totalSeconds = chapterInfo.startTimeMs / 1000;
+        int hours = totalSeconds / 3600;
+        int minutes = (totalSeconds % 3600) / 60;
+        int seconds = totalSeconds % 60;
+        
+        if (hours > 0) {
+            chapterInfo.formattedTime = QString("%1:%2:%3")
+                .arg(hours)
+                .arg(minutes, 2, 10, QChar('0'))
+                .arg(seconds, 2, 10, QChar('0'));
+        } else {
+            chapterInfo.formattedTime = QString("%1:%2")
+                .arg(minutes, 2, 10, QChar('0'))
+                .arg(seconds, 2, 10, QChar('0'));
+        }
+        
+        // Extract chapter title from metadata
+        chapterInfo.title = QString("Chapter %1").arg(i + 1); // Default title
+        
+        if (chapter->metadata) {
+            AVDictionaryEntry *titleEntry = av_dict_get(chapter->metadata, "title", nullptr, 0);
+            if (titleEntry && titleEntry->value) {
+                chapterInfo.title = QString::fromUtf8(titleEntry->value);
+            }
+        }
+        
+        // If title is empty or just whitespace, use default
+        if (chapterInfo.title.trimmed().isEmpty()) {
+            chapterInfo.title = QString("Chapter %1").arg(i + 1);
+        }
+        
+        chapters.append(chapterInfo);
+        
+        qDebug() << "Found chapter:" << chapterInfo.title 
+                 << "at" << chapterInfo.formattedTime 
+                 << "(" << chapterInfo.startTimeMs << "ms)";
+    }
+    
+    closeVideoFile(formatContext);
+    
+    if (chapters.isEmpty()) {
+        qDebug() << "No chapters found in" << filePath;
+    } else {
+        qDebug() << "Extracted" << chapters.size() << "chapters from" << filePath;
+    }
+    
+    return chapters;
+}
+
 AVFormatContext* FFmpegHandler::openVideoFile(const QString &filePath)
 {
     AVFormatContext *formatContext = nullptr;

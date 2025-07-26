@@ -33,6 +33,9 @@ struct ComparisonResult {
     QString description;
 };
 
+// Forward declaration for ChapterInfo (defined in ffmpeghandler.h)
+struct ChapterInfo;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -73,6 +76,15 @@ private slots:
     void onComparisonProgress(int percentage);
     void onComparisonComplete(const QList<ComparisonResult> &results);
     void onAutoComparisonComplete(double overallSimilarity, bool videosIdentical, const QString &summary);
+    
+    // Chapter navigation slots
+    void onChapterSelected();
+    void onPreviousChapter();
+    void onNextChapter();
+    void updateChapterLists();
+    void jumpToCurrentChapter();
+    void updateCurrentChapterDisplay(qint64 currentTimestamp);
+    void updateChapterNavigation();
 
 private:
     void setupUI();
@@ -101,6 +113,18 @@ private:
     QPushButton *m_autoCompareButton;
     QProgressBar *m_comparisonProgressBar;
     QLabel *m_comparisonResultLabel;
+    
+    // Chapter navigation controls
+    QListWidget *m_leftChaptersList;
+    QListWidget *m_rightChaptersList;
+    QPushButton *m_prevChapterButton;
+    QPushButton *m_nextChapterButton;
+    QLabel *m_currentChapterLabel;
+    
+    // Chapter data
+    QList<ChapterInfo> m_leftVideoChapters;
+    QList<ChapterInfo> m_rightVideoChapters;
+    int m_currentChapterIndex;
     
     // Transfer tab
     QWidget *m_transferTab;

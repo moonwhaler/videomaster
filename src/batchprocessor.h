@@ -13,6 +13,9 @@
 #include <QGroupBox>
 #include <QCheckBox>
 #include <QSpinBox>
+#include <QThread>
+
+class BatchWorker;
 
 class BatchProcessor : public QWidget
 {
@@ -20,6 +23,7 @@ class BatchProcessor : public QWidget
 
 public:
     explicit BatchProcessor(QWidget *parent = nullptr);
+    ~BatchProcessor();
     
     void setOutputPostfix(const QString &postfix);
     void applyTheme();
@@ -45,6 +49,12 @@ private slots:
     void onClearAudioSelection();
     void onClearSubtitleSelection();
     void onThemeChanged();
+    
+    // Worker thread slots
+    void onWorkerProgressUpdated(int current, int total, const QString &currentFile);
+    void onWorkerJobCompleted(int jobIndex, bool success, const QString &message);
+    void onWorkerProcessingFinished(bool cancelled);
+    void onWorkerLogMessage(const QString &message);
 
 private:
     void setupUI();
@@ -93,6 +103,10 @@ private:
     
     QString m_currentPostfix;
     bool m_processingCancelled;
+    
+    // Threading
+    QThread *m_workerThread;
+    BatchWorker *m_worker;
 };
 
 #endif // BATCHPROCESSOR_H

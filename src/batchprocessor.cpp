@@ -1,6 +1,7 @@
 #include "batchprocessor.h"
 #include "ffmpeghandler.h"
 #include "thememanager.h"
+#include "batchworker.h"
 #include <QFileDialog>
 #include <QDir>
 #include <QFileInfo>
@@ -10,12 +11,15 @@
 #include <QRegularExpression>
 #include <QPainter>
 #include <QPixmap>
+#include <QThread>
 
 BatchProcessor::BatchProcessor(QWidget *parent)
     : QWidget(parent)
     , m_mainLayout(new QVBoxLayout(this))
     , m_currentPostfix("_merged")
     , m_processingCancelled(false)
+    , m_workerThread(nullptr)
+    , m_worker(nullptr)
 {
     // Connect to theme manager
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
@@ -25,6 +29,25 @@ BatchProcessor::BatchProcessor(QWidget *parent)
     
     // Apply initial theme after UI is set up
     applyTheme();
+}
+
+BatchProcessor::~BatchProcessor()
+{
+    // Clean up worker thread
+    if (m_workerThread) {
+        if (m_worker) {
+            m_worker->requestStop();
+        }
+        
+        m_workerThread->quit();
+        if (!m_workerThread->wait(3000)) {
+            m_workerThread->terminate();
+            m_workerThread->wait(1000);
+        }
+        
+        delete m_worker;
+        delete m_workerThread;
+    }
 }
 
 void BatchProcessor::setupUI()
@@ -957,44 +980,26 @@ void BatchProcessor::onStartBatchProcess()
         return;
     }
     
-    // Start processing
-    m_processingCancelled = false;
-    m_startButton->setEnabled(false);
-    m_stopButton->setEnabled(true);
-    m_progressBar->setRange(0, sourceFiles.size());
-    m_progressBar->setValue(0);
-    m_logOutput->clear();
-    
+    // Prepare jobs for worker thread
+    QList<BatchWorker::ProcessingJob> jobs;
     FFmpegHandler handler;
     
-    for (int i = 0; i < sourceFiles.size() && !m_processingCancelled; ++i) {
-        QString logMessage = QString("Processing %1/%2: %3")
-                            .arg(i + 1)
-                            .arg(sourceFiles.size())
-                            .arg(QFileInfo(targetFiles[i]).fileName());
-        m_logOutput->append(logMessage);
-        QApplication::processEvents();
-        
-        // Check for cancellation after processing events
-        if (m_processingCancelled) {
-            m_logOutput->append("Processing cancelled by user");
-            break;
-        }
-        
+    for (int i = 0; i < sourceFiles.size(); ++i) {
         QFileInfo targetInfo(targetFiles[i]);
         QString outputFile = QDir(outputDir).absoluteFilePath(
             targetInfo.baseName() + m_currentPostfix + "." + targetInfo.suffix());
         
-        // Build track selection list for merge operation
-        QList<QPair<QString, int>> selectedAudioTracks;
-        QList<QPair<QString, int>> selectedSubtitleTracks;
+        BatchWorker::ProcessingJob job;
+        job.sourceFile = sourceFiles[i];
+        job.targetFile = targetFiles[i];
+        job.outputFile = outputFile;
         
         // Add selected source tracks (tracks to ADD)
         for (int trackIndex : sourceAudioTrackIndexes) {
-            selectedAudioTracks.append(qMakePair(QString("source"), trackIndex));
+            job.selectedAudioTracks.append(qMakePair(QString("source"), trackIndex));
         }
         for (int trackIndex : sourceSubtitleTrackIndexes) {
-            selectedSubtitleTracks.append(qMakePair(QString("source"), trackIndex));
+            job.selectedSubtitleTracks.append(qMakePair(QString("source"), trackIndex));
         }
         
         // Add existing target tracks (unless user wants to remove them)
@@ -1002,50 +1007,63 @@ void BatchProcessor::onStartBatchProcess()
             // Get existing tracks from target file
             QList<AudioTrackInfo> targetAudioTracks = handler.getAudioTracks(targetFiles[i]);
             for (const AudioTrackInfo &track : targetAudioTracks) {
-                selectedAudioTracks.append(qMakePair(QString("target"), track.index));
+                job.selectedAudioTracks.append(qMakePair(QString("target"), track.index));
             }
             
             QList<SubtitleTrackInfo> targetSubtitleTracks = handler.getSubtitleTracks(targetFiles[i]);
             for (const SubtitleTrackInfo &track : targetSubtitleTracks) {
-                selectedSubtitleTracks.append(qMakePair(QString("target"), track.index));
+                job.selectedSubtitleTracks.append(qMakePair(QString("target"), track.index));
             }
         }
         
-        // Use new merge operation
-        bool success = handler.mergeTracks(sourceFiles[i], targetFiles[i], outputFile,
-                                          selectedAudioTracks, selectedSubtitleTracks);
-        
-        if (success) {
-            m_logOutput->append("Success - tracks merged");
-        } else {
-            m_logOutput->append("Failed");
-        }
-        
-        m_progressBar->setValue(i + 1);
-        QApplication::processEvents();
-        
-        // Final cancellation check
-        if (m_processingCancelled) {
-            break;
-        }
+        jobs.append(job);
     }
     
-    // Reset button states
-    m_startButton->setEnabled(true);
-    m_stopButton->setEnabled(false);
-    
-    if (m_processingCancelled) {
-        m_logOutput->append("\nBatch processing was cancelled!");
-        QMessageBox::information(this, "Cancelled", 
-                                QString("Batch processing was cancelled!\nProcessed %1 out of %2 files.")
-                                .arg(m_progressBar->value())
-                                .arg(sourceFiles.size()));
-    } else {
-        m_logOutput->append("\nBatch processing completed!");
-        QMessageBox::information(this, "Completed", 
-                                QString("Batch processing completed!\nProcessed %1 files.")
-                                .arg(sourceFiles.size()));
+    // Clean up previous worker if exists
+    if (m_workerThread) {
+        if (m_worker) {
+            m_worker->requestStop();
+        }
+        
+        m_workerThread->quit();
+        m_workerThread->wait(1000);
+        
+        delete m_worker;
+        delete m_workerThread;
     }
+    
+    // Create new worker thread
+    m_workerThread = new QThread(this);
+    m_worker = new BatchWorker();
+    m_worker->moveToThread(m_workerThread);
+    
+    // Connect worker signals
+    connect(m_worker, &BatchWorker::progressUpdated, 
+            this, &BatchProcessor::onWorkerProgressUpdated);
+    connect(m_worker, &BatchWorker::jobCompleted,
+            this, &BatchProcessor::onWorkerJobCompleted);
+    connect(m_worker, &BatchWorker::processingFinished,
+            this, &BatchProcessor::onWorkerProcessingFinished);
+    connect(m_worker, &BatchWorker::logMessage,
+            this, &BatchProcessor::onWorkerLogMessage);
+    
+    // Connect thread signals
+    connect(m_workerThread, &QThread::started,
+            m_worker, &BatchWorker::startProcessing);
+    connect(m_workerThread, &QThread::finished,
+            m_worker, &QObject::deleteLater);
+    
+    // Set up UI for processing
+    m_processingCancelled = false;
+    m_startButton->setEnabled(false);
+    m_stopButton->setEnabled(true);
+    m_progressBar->setRange(0, jobs.size());
+    m_progressBar->setValue(0);
+    m_logOutput->clear();
+    
+    // Start processing in worker thread
+    m_worker->setJobs(jobs);
+    m_workerThread->start();
 }
 
 void BatchProcessor::onStopBatchProcess()
@@ -1053,7 +1071,11 @@ void BatchProcessor::onStopBatchProcess()
     m_processingCancelled = true;
     m_stopButton->setEnabled(false);  // Disable to prevent multiple clicks
     m_logOutput->append("Stopping batch processing...");
-    QApplication::processEvents(); // Process the UI update immediately
+    
+    // Request worker to stop
+    if (m_worker) {
+        m_worker->requestStop();
+    }
 }
 
 QIcon BatchProcessor::createColoredIcon(const QColor &color, int size)
@@ -1223,4 +1245,57 @@ void BatchProcessor::applyTheme()
 void BatchProcessor::onThemeChanged()
 {
     applyTheme();
+}
+
+void BatchProcessor::onWorkerProgressUpdated(int current, int total, const QString &currentFile)
+{
+    m_progressBar->setRange(0, total);
+    m_progressBar->setValue(current);
+    
+    if (!currentFile.isEmpty()) {
+        QFileInfo fileInfo(currentFile);
+        m_logOutput->append(QString("Processing: %1").arg(fileInfo.fileName()));
+    }
+}
+
+void BatchProcessor::onWorkerJobCompleted(int jobIndex, bool success, const QString &message)
+{
+    if (success) {
+        m_logOutput->append(QString("✓ Job %1 completed: %2").arg(jobIndex + 1).arg(message));
+    } else {
+        m_logOutput->append(QString("✗ Job %1 failed: %2").arg(jobIndex + 1).arg(message));
+    }
+}
+
+void BatchProcessor::onWorkerProcessingFinished(bool cancelled)
+{
+    // Clean up UI state
+    m_startButton->setEnabled(true);
+    m_stopButton->setEnabled(false);
+    
+    if (cancelled) {
+        m_logOutput->append("Batch processing was cancelled.");
+        m_progressBar->setValue(0);
+    } else {
+        m_logOutput->append("Batch processing completed!");
+        m_progressBar->setValue(m_progressBar->maximum());
+    }
+    
+    // Clean up worker thread
+    if (m_workerThread) {
+        m_workerThread->quit();
+        m_workerThread->wait(3000);
+        
+        delete m_worker;
+        delete m_workerThread;
+        m_worker = nullptr;
+        m_workerThread = nullptr;
+    }
+    
+    m_processingCancelled = false;
+}
+
+void BatchProcessor::onWorkerLogMessage(const QString &message)
+{
+    m_logOutput->append(message);
 }

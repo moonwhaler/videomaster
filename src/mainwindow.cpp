@@ -2,6 +2,7 @@
 #include "videowidget.h"
 #include "videocomparator.h"
 #include "batchprocessor.h"
+#include "transferworker.h"
 #include "ffmpeghandler.h"
 #include "thememanager.h"
 #include <QApplication>
@@ -9,12 +10,15 @@
 #include <QFileDialog>
 #include <QPainter>
 #include <QPixmap>
+#include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_tabWidget(new QTabWidget(this))
     , m_comparator(new VideoComparator(this))
     , m_isPlaying(false)
+    , m_transferThread(nullptr)
+    , m_transferWorker(nullptr)
 {
     // Connect to theme manager
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
@@ -29,7 +33,16 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1200, 800);
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow()
+{
+    // Clean up transfer thread
+    if (m_transferThread) {
+        m_transferThread->quit();
+        m_transferThread->wait(3000);
+        delete m_transferWorker;
+        delete m_transferThread;
+    }
+}
 
 void MainWindow::setupUI()
 {
@@ -481,22 +494,77 @@ void MainWindow::onTransferTracks()
                         targetInfo.baseName() + m_postfixEdit->text() + 
                         "." + targetInfo.suffix();
     
-    // Perform merge operation
-    FFmpegHandler handler;
-    bool success = handler.mergeTracks(sourceFile, targetFile, outputFile,
-                                      selectedAudioTracks, selectedSubtitleTracks);
-    
-    if (success) {
-        QMessageBox::information(this, "Success", 
-                                QString("Tracks transferred successfully to:\n%1").arg(outputFile));
-    } else {
-        QMessageBox::critical(this, "Error", "Failed to transfer tracks.");
+    // Clean up previous worker if exists
+    if (m_transferThread) {
+        m_transferThread->quit();
+        m_transferThread->wait(1000);
+        delete m_transferWorker;
+        delete m_transferThread;
     }
+    
+    // Create new worker thread for transfer
+    m_transferThread = new QThread(this);
+    m_transferWorker = new TransferWorker();
+    m_transferWorker->moveToThread(m_transferThread);
+    
+    // Set up the transfer job
+    m_transferWorker->setTransferJob(sourceFile, targetFile, outputFile,
+                                    selectedAudioTracks, selectedSubtitleTracks);
+    
+    // Connect worker signals
+    connect(m_transferWorker, &TransferWorker::transferCompleted,
+            this, &MainWindow::onTransferCompleted);
+    connect(m_transferWorker, &TransferWorker::logMessage,
+            this, &MainWindow::onTransferLogMessage);
+    
+    // Connect thread signals
+    connect(m_transferThread, &QThread::started,
+            m_transferWorker, &TransferWorker::startTransfer);
+    connect(m_transferThread, &QThread::finished,
+            m_transferWorker, &QObject::deleteLater);
+    
+    // Disable transfer button during processing
+    m_transferButton->setEnabled(false);
+    m_transferButton->setText("Transferring...");
+    
+    // Start processing in worker thread
+    m_transferThread->start();
 }
 
 void MainWindow::onBatchProcess()
 {
     // Implementation will be added with batch processor
+}
+
+void MainWindow::onTransferCompleted(bool success, const QString &message)
+{
+    // Re-enable transfer button
+    m_transferButton->setEnabled(true);
+    m_transferButton->setText("Transfer Selected Tracks");
+    
+    // Clean up worker thread
+    if (m_transferThread) {
+        m_transferThread->quit();
+        m_transferThread->wait(3000);
+        delete m_transferWorker;
+        delete m_transferThread;
+        m_transferWorker = nullptr;
+        m_transferThread = nullptr;
+    }
+    
+    // Show result to user
+    if (success) {
+        QMessageBox::information(this, "Success", message);
+    } else {
+        QMessageBox::critical(this, "Error", message);
+    }
+}
+
+void MainWindow::onTransferLogMessage(const QString &message)
+{
+    // For now, we don't have a log widget in the transfer tab
+    // This could be extended to add logging if needed
+    qDebug() << "Transfer log:" << message;
 }
 
 void MainWindow::onPostfixChanged()

@@ -19,10 +19,12 @@
 #include <QMenu>
 #include <QAction>
 #include <QActionGroup>
+#include <QThread>
 
 class VideoWidget;
 class VideoComparator;
 class BatchProcessor;
+class TransferWorker;
 
 class MainWindow : public QMainWindow
 {
@@ -54,6 +56,10 @@ private slots:
     void onSystemThemeTriggered();
     void onLightThemeTriggered();
     void onDarkThemeTriggered();
+    
+    // Transfer worker slots
+    void onTransferCompleted(bool success, const QString &message);
+    void onTransferLogMessage(const QString &message);
 
 private:
     void setupUI();
@@ -108,6 +114,10 @@ private:
     QAction *m_systemThemeAction;
     QAction *m_lightThemeAction;
     QAction *m_darkThemeAction;
+    
+    // Threading for transfer operations
+    QThread *m_transferThread;
+    TransferWorker *m_transferWorker;
 };
 
 #endif // MAINWINDOW_H

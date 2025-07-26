@@ -28,6 +28,8 @@ set(SOURCES
     src/ffmpeghandler.cpp
     src/batchprocessor.cpp
     src/thememanager.cpp
+    src/batchworker.cpp
+    src/transferworker.cpp
 )
 
 set(HEADERS
@@ -37,6 +39,8 @@ set(HEADERS
     src/ffmpeghandler.h
     src/batchprocessor.h
     src/thememanager.h
+    src/batchworker.h
+    src/transferworker.h
 )
 
 add_executable(VideoMaster ${SOURCES} ${HEADERS})

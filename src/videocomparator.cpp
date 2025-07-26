@@ -1,13 +1,18 @@
 #include "videocomparator.h"
 #include "ffmpeghandler.h"
 #include <QDebug>
+#include <algorithm>
+#include <cstdlib>
+#include <random>
 
 VideoComparator::VideoComparator(QObject *parent)
     : QObject(parent)
     , m_comparisonTimer(new QTimer(this))
     , m_isComparing(false)
+    , m_isAutoComparing(false)
     , m_currentTimestamp(0)
     , m_videoDuration(0)
+    , m_currentSampleIndex(0)
 {
     connect(m_comparisonTimer, &QTimer::timeout, this, &VideoComparator::performFrameComparison);
     m_comparisonTimer->setInterval(100); // Compare every 100ms during playback
@@ -126,4 +131,170 @@ double VideoComparator::compareFramesAtTimestamp(qint64 timestamp)
     }
     
     return similarPixels / totalPixels;
+}
+
+void VideoComparator::startAutoComparison()
+{
+    if (m_videoPath1.isEmpty() || m_videoPath2.isEmpty()) {
+        qWarning() << "Cannot start auto comparison: both videos must be loaded";
+        return;
+    }
+    
+    QMutexLocker locker(&m_mutex);
+    
+    if (m_isComparing || m_isAutoComparing) {
+        qWarning() << "Comparison already in progress";
+        return;
+    }
+    
+    m_isAutoComparing = true;
+    m_currentSampleIndex = 0;
+    m_autoSimilarityResults.clear();
+    
+    // Generate strategic sampling timestamps
+    FFmpegHandler handler;
+    qint64 duration = handler.getVideoDuration(m_videoPath1);
+    m_autoSampleTimestamps = generateSampleTimestamps(duration);
+    
+    qDebug() << "Starting auto comparison with" << m_autoSampleTimestamps.size() << "samples";
+    
+    // Start the auto comparison process
+    QTimer::singleShot(0, this, &VideoComparator::performAutoComparison);
+}
+
+void VideoComparator::performAutoComparison()
+{
+    if (!m_isAutoComparing || m_currentSampleIndex >= m_autoSampleTimestamps.size()) {
+        // Comparison complete - calculate results
+        if (!m_autoSimilarityResults.isEmpty()) {
+            double overallSimilarity = calculateOverallSimilarity(m_autoSimilarityResults);
+            bool identical = determineIfIdentical(overallSimilarity, m_autoSimilarityResults);
+            
+            QString summary = QString("Analyzed %1 frames across video duration.\n"
+                                    "Average similarity: %2%\n"
+                                    "Verdict: Videos are %3")
+                            .arg(m_autoSimilarityResults.size())
+                            .arg(overallSimilarity * 100, 0, 'f', 1)
+                            .arg(identical ? "IDENTICAL" : "DIFFERENT");
+            
+            qDebug() << "Auto comparison complete:" << summary;
+            emit autoComparisonComplete(overallSimilarity, identical, summary);
+        }
+        
+        m_isAutoComparing = false;
+        return;
+    }
+    
+    // Compare current sample
+    qint64 timestamp = m_autoSampleTimestamps[m_currentSampleIndex];
+    double similarity = compareFramesAtTimestamp(timestamp);
+    m_autoSimilarityResults.append(similarity);
+    
+    qDebug() << "Sample" << (m_currentSampleIndex + 1) << "at" << timestamp << "ms: similarity" << (similarity * 100) << "%";
+    
+    // Update progress
+    int progress = ((m_currentSampleIndex + 1) * 100) / m_autoSampleTimestamps.size();
+    emit comparisonProgress(progress);
+    
+    m_currentSampleIndex++;
+    
+    // Schedule next comparison (small delay to allow UI updates)
+    QTimer::singleShot(50, this, &VideoComparator::performAutoComparison);
+}
+
+QList<qint64> VideoComparator::generateSampleTimestamps(qint64 duration, int sampleCount)
+{
+    QList<qint64> timestamps;
+    
+    if (duration <= 0 || sampleCount <= 0) {
+        return timestamps;
+    }
+    
+    // Strategic sampling points:
+    // 1. Beginning (first 5 seconds)
+    timestamps.append(1000);   // 1 second
+    timestamps.append(3000);   // 3 seconds
+    timestamps.append(5000);   // 5 seconds
+    
+    // 2. End (last 5 seconds)
+    timestamps.append(duration - 5000);  // 5 seconds from end
+    timestamps.append(duration - 3000);  // 3 seconds from end
+    timestamps.append(duration - 1000);  // 1 second from end
+    
+    // 3. Middle point
+    timestamps.append(duration / 2);
+    
+    // 4. Quarter points
+    timestamps.append(duration / 4);
+    timestamps.append(3 * duration / 4);
+    
+    // 5. Random sampling points for remaining samples
+    int remainingSamples = sampleCount - timestamps.size();
+    if (remainingSamples > 0) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<qint64> dist(5000, duration - 5000);
+        
+        for (int i = 0; i < remainingSamples; ++i) {
+            qint64 randomTime = dist(gen);
+            timestamps.append(randomTime);
+        }
+    }
+    
+    // Sort timestamps for logical progression
+    std::sort(timestamps.begin(), timestamps.end());
+    
+    // Remove duplicates and ensure all timestamps are valid
+    QList<qint64> validTimestamps;
+    for (qint64 ts : timestamps) {
+        if (ts > 0 && ts < duration && !validTimestamps.contains(ts)) {
+            validTimestamps.append(ts);
+        }
+    }
+    
+    return validTimestamps;
+}
+
+double VideoComparator::calculateOverallSimilarity(const QList<double> &similarities)
+{
+    if (similarities.isEmpty()) {
+        return 0.0;
+    }
+    
+    double sum = 0.0;
+    for (double sim : similarities) {
+        sum += sim;
+    }
+    
+    return sum / similarities.size();
+}
+
+bool VideoComparator::determineIfIdentical(double overallSimilarity, const QList<double> &similarities)
+{
+    // Videos are considered identical if:
+    // 1. Overall similarity is above 95%
+    // 2. No individual frame has similarity below 90%
+    // 3. At least 80% of frames have similarity above 98%
+    
+    const double OVERALL_THRESHOLD = 0.95;
+    const double MIN_FRAME_THRESHOLD = 0.90;
+    const double HIGH_SIMILARITY_THRESHOLD = 0.98;
+    const double HIGH_SIMILARITY_RATIO = 0.80;
+    
+    if (overallSimilarity < OVERALL_THRESHOLD) {
+        return false;
+    }
+    
+    int highSimilarityCount = 0;
+    for (double sim : similarities) {
+        if (sim < MIN_FRAME_THRESHOLD) {
+            return false; // Any frame too different
+        }
+        if (sim >= HIGH_SIMILARITY_THRESHOLD) {
+            highSimilarityCount++;
+        }
+    }
+    
+    double highSimilarityRatio = static_cast<double>(highSimilarityCount) / similarities.size();
+    return highSimilarityRatio >= HIGH_SIMILARITY_RATIO;
 }

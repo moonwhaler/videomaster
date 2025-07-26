@@ -26,6 +26,13 @@ class VideoComparator;
 class BatchProcessor;
 class TransferWorker;
 
+// Forward declaration for ComparisonResult
+struct ComparisonResult {
+    double similarity;
+    qint64 timestamp;
+    QString description;
+};
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -60,6 +67,12 @@ private slots:
     // Transfer worker slots
     void onTransferCompleted(bool success, const QString &message);
     void onTransferLogMessage(const QString &message);
+    
+    // Auto comparison slots
+    void onAutoCompare();
+    void onComparisonProgress(int percentage);
+    void onComparisonComplete(const QList<ComparisonResult> &results);
+    void onAutoComparisonComplete(double overallSimilarity, bool videosIdentical, const QString &summary);
 
 private:
     void setupUI();
@@ -83,6 +96,11 @@ private:
     QLabel *m_timestampLabel;
     VideoComparator *m_comparator;
     bool m_isPlaying;
+    
+    // Auto comparison controls
+    QPushButton *m_autoCompareButton;
+    QProgressBar *m_comparisonProgressBar;
+    QLabel *m_comparisonResultLabel;
     
     // Transfer tab
     QWidget *m_transferTab;

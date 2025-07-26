@@ -120,6 +120,11 @@ void MainWindow::setupComparisonTab()
     m_syncButton->setMinimumWidth(100);
     m_syncButton->setStyleSheet(theme->primaryButtonStyleSheet());
     
+    // Auto compare button
+    m_autoCompareButton = new QPushButton("Auto Compare", this);
+    m_autoCompareButton->setMinimumWidth(100);
+    m_autoCompareButton->setStyleSheet(theme->successButtonStyleSheet());
+    
     // Timeline label
     QLabel *timelineLabel = new QLabel("Timeline:");
     timelineLabel->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
@@ -147,13 +152,50 @@ void MainWindow::setupComparisonTab()
     m_timestampLabel->setAlignment(Qt::AlignCenter);
     
     controlLayout->addWidget(m_syncButton);
+    controlLayout->addWidget(m_autoCompareButton);
     controlLayout->addWidget(timelineLabel);
     controlLayout->addWidget(m_timestampSlider, 1);
     controlLayout->addWidget(m_timestampLabel);
     
+    // Auto comparison results area
+    QWidget *resultsPanel = new QWidget();
+    resultsPanel->setStyleSheet(QString(
+        "QWidget { "
+        "   background-color: %1; "
+        "   border: 1px solid %2; "
+        "   border-radius: 4px; "
+        "}"
+    ).arg(theme->surfaceColor()).arg(theme->borderColor()));
+    QVBoxLayout *resultsLayout = new QVBoxLayout(resultsPanel);
+    resultsLayout->setContentsMargins(12, 8, 12, 8);
+    resultsLayout->setSpacing(6);
+    
+    // Progress bar for auto comparison
+    m_comparisonProgressBar = new QProgressBar(this);
+    m_comparisonProgressBar->setVisible(false);
+    m_comparisonProgressBar->setStyleSheet(theme->progressBarStyleSheet());
+    
+    // Result label
+    m_comparisonResultLabel = new QLabel("Load both videos and click 'Auto Compare' to analyze similarity", this);
+    m_comparisonResultLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-size: 12px; "
+        "   color: %1; "
+        "   padding: 4px; "
+        "   background-color: transparent; "
+        "   border: none; "
+        "}"
+    ).arg(theme->secondaryTextColor()));
+    m_comparisonResultLabel->setWordWrap(true);
+    m_comparisonResultLabel->setAlignment(Qt::AlignCenter);
+    
+    resultsLayout->addWidget(m_comparisonProgressBar);
+    resultsLayout->addWidget(m_comparisonResultLabel);
+    
     // Assemble main layout
     mainLayout->addWidget(videoSplitter, 1);
     mainLayout->addWidget(controlPanel);
+    mainLayout->addWidget(resultsPanel);
     
     // Connect signals
     connect(m_leftVideoWidget, &VideoWidget::videoLoaded, 
@@ -161,12 +203,17 @@ void MainWindow::setupComparisonTab()
     connect(m_rightVideoWidget, &VideoWidget::videoLoaded, 
             [this](const QString &path) { onVideoLoaded(1, path); });
     connect(m_syncButton, &QPushButton::clicked, this, &MainWindow::onSyncPlayback);
+    connect(m_autoCompareButton, &QPushButton::clicked, this, &MainWindow::onAutoCompare);
     connect(m_timestampSlider, &QSlider::sliderMoved, this, &MainWindow::onSeekToTimestamp);
     connect(m_timestampSlider, &QSlider::sliderPressed, this, &MainWindow::onSeekToTimestamp);
     
     // Connect position changes from video widgets to update slider and sync
     connect(m_leftVideoWidget, &VideoWidget::positionChanged, this, &MainWindow::onVideoPositionChanged);
     connect(m_rightVideoWidget, &VideoWidget::positionChanged, this, &MainWindow::onVideoPositionChanged);
+    
+    // Connect video comparator signals for auto comparison
+    connect(m_comparator, &VideoComparator::comparisonProgress, this, &MainWindow::onComparisonProgress);
+    connect(m_comparator, &VideoComparator::autoComparisonComplete, this, &MainWindow::onAutoComparisonComplete);
 }
 
 void MainWindow::setupTransferTab()
@@ -864,8 +911,10 @@ void MainWindow::refreshTabStyling()
             ).arg(theme->surfaceColor()).arg(theme->borderColor()));
         }
         
-        // Update sync button and timestamp label
+        // Update sync button, auto compare button and timestamp label
         if (m_syncButton) m_syncButton->setStyleSheet(theme->primaryButtonStyleSheet());
+        if (m_autoCompareButton) m_autoCompareButton->setStyleSheet(theme->successButtonStyleSheet());
+        if (m_comparisonProgressBar) m_comparisonProgressBar->setStyleSheet(theme->progressBarStyleSheet());
         if (m_timestampSlider) m_timestampSlider->setStyleSheet(theme->sliderStyleSheet());
         if (m_timestampLabel) {
             m_timestampLabel->setStyleSheet(QString(
@@ -986,5 +1035,85 @@ void MainWindow::onLightThemeTriggered()
 void MainWindow::onDarkThemeTriggered()
 {
     ThemeManager::instance()->setTheme(ThemeManager::Dark);
+}
+
+void MainWindow::onAutoCompare()
+{
+    QString leftPath = m_leftVideoWidget->currentFilePath();
+    QString rightPath = m_rightVideoWidget->currentFilePath();
+    
+    if (leftPath.isEmpty() || rightPath.isEmpty()) {
+        m_comparisonResultLabel->setText("Please load both videos before starting auto comparison.");
+        m_comparisonResultLabel->setStyleSheet(QString(
+            "QLabel { "
+            "   font-size: 12px; "
+            "   color: %1; "
+            "   padding: 4px; "
+            "   background-color: transparent; "
+            "   border: none; "
+            "}"
+        ).arg(ThemeManager::instance()->dangerColor()));
+        return;
+    }
+    
+    // Disable button and show progress
+    m_autoCompareButton->setEnabled(false);
+    m_autoCompareButton->setText("Comparing...");
+    m_comparisonProgressBar->setVisible(true);
+    m_comparisonProgressBar->setValue(0);
+    m_comparisonResultLabel->setText("Analyzing video similarity... This may take a moment.");
+    m_comparisonResultLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-size: 12px; "
+        "   color: %1; "
+        "   padding: 4px; "
+        "   background-color: transparent; "
+        "   border: none; "
+        "}"
+    ).arg(ThemeManager::instance()->secondaryTextColor()));
+    
+    // Start the automatic comparison
+    m_comparator->startAutoComparison();
+}
+
+void MainWindow::onComparisonProgress(int percentage)
+{
+    m_comparisonProgressBar->setValue(percentage);
+    m_comparisonResultLabel->setText(QString("Analyzing video similarity... %1% complete").arg(percentage));
+}
+
+void MainWindow::onComparisonComplete(const QList<ComparisonResult> &results)
+{
+    Q_UNUSED(results); // We're not using the detailed results for this version
+}
+
+void MainWindow::onAutoComparisonComplete(double overallSimilarity, bool videosIdentical, const QString &summary)
+{
+    // Re-enable button and hide progress
+    m_autoCompareButton->setEnabled(true);
+    m_autoCompareButton->setText("Auto Compare");
+    m_comparisonProgressBar->setVisible(false);
+    
+    // Set result color based on outcome
+    QString resultColor;
+    if (videosIdentical) {
+        resultColor = ThemeManager::instance()->successColor();
+    } else if (overallSimilarity > 0.80) {
+        resultColor = ThemeManager::instance()->primaryColor();
+    } else {
+        resultColor = ThemeManager::instance()->dangerColor();
+    }
+    
+    m_comparisonResultLabel->setText(summary);
+    m_comparisonResultLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-size: 12px; "
+        "   color: %1; "
+        "   padding: 4px; "
+        "   background-color: transparent; "
+        "   border: none; "
+        "   font-weight: 500; "
+        "}"
+    ).arg(resultColor));
 }
 

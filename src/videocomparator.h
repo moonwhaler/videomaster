@@ -17,6 +17,7 @@ public:
     void setVideo(int index, const QString &filePath);
     void startComparison();
     void stopComparison();
+    void startAutoComparison();  // New method for automatic comparison
     
     struct ComparisonResult {
         double similarity;
@@ -28,9 +29,11 @@ signals:
     void comparisonProgress(int percentage);
     void comparisonComplete(const QList<ComparisonResult> &results);
     void frameCompared(qint64 timestamp, double similarity);
+    void autoComparisonComplete(double overallSimilarity, bool videosIdentical, const QString &summary);
 
 private slots:
     void performFrameComparison();
+    void performAutoComparison();
 
 private:
     QString m_videoPath1;
@@ -38,10 +41,19 @@ private:
     QTimer *m_comparisonTimer;
     QMutex m_mutex;
     bool m_isComparing;
+    bool m_isAutoComparing;
     qint64 m_currentTimestamp;
     qint64 m_videoDuration;
     
+    // Auto comparison state
+    QList<qint64> m_autoSampleTimestamps;
+    int m_currentSampleIndex;
+    QList<double> m_autoSimilarityResults;
+    
     double compareFramesAtTimestamp(qint64 timestamp);
+    QList<qint64> generateSampleTimestamps(qint64 duration, int sampleCount = 15);
+    double calculateOverallSimilarity(const QList<double> &similarities);
+    bool determineIfIdentical(double overallSimilarity, const QList<double> &similarities);
     QList<ComparisonResult> m_results;
 };
 

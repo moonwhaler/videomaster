@@ -5,17 +5,53 @@
 #include <QCoreApplication>
 #include <QTimer>
 
+// ClickableVideoWidget implementation
+ClickableVideoWidget::ClickableVideoWidget(QWidget *parent)
+    : QVideoWidget(parent)
+{
+    setAcceptDrops(true);
+}
+
+void ClickableVideoWidget::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        emit clicked();
+    }
+    QVideoWidget::mousePressEvent(event);
+}
+
+void ClickableVideoWidget::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasUrls()) {
+        QUrl url = event->mimeData()->urls().first();
+        QString filePath = url.toLocalFile();
+        QFileInfo fileInfo(filePath);
+        
+        QStringList videoExtensions = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"};
+        if (videoExtensions.contains(fileInfo.suffix().toLower())) {
+            event->acceptProposedAction();
+        }
+    }
+}
+
+void ClickableVideoWidget::dropEvent(QDropEvent *event)
+{
+    QUrl url = event->mimeData()->urls().first();
+    QString filePath = url.toLocalFile();
+    emit fileDropped(filePath);
+}
+
 VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     : QWidget(parent)
     , m_layout(new QVBoxLayout(this))
     , m_titleLabel(new QLabel(title, this))
     , m_stackedWidget(new QStackedWidget(this))
-    , m_videoWidget(new QVideoWidget(this))
+    , m_videoWidget(new ClickableVideoWidget(this))
     , m_mediaPlayer(new QMediaPlayer(this))
     , m_playButton(new QPushButton("Play", this))
     , m_positionSlider(new QSlider(Qt::Horizontal, this))
     , m_timeLabel(new QLabel("00:00 / 00:00", this))
-    , m_dropLabel(new QLabel("Drop video file here", this))
+    , m_dropLabel(new QPushButton("Drop video file here or click to select", this))
 {
     setupUI();
     setAcceptDrops(true);
@@ -30,6 +66,13 @@ VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, &VideoWidget::onPositionChanged);
     connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, &VideoWidget::onDurationChanged);
     connect(m_positionSlider, &QSlider::sliderMoved, this, &VideoWidget::seek);
+    
+    // Connect ClickableVideoWidget signals
+    connect(m_videoWidget, &ClickableVideoWidget::clicked, this, &VideoWidget::onVideoWidgetClicked);
+    connect(m_videoWidget, &ClickableVideoWidget::fileDropped, this, &VideoWidget::onVideoWidgetFileDropped);
+    
+    // Connect drop label click
+    connect(m_dropLabel, &QPushButton::clicked, this, &VideoWidget::onDropLabelClicked);
 }
 
 void VideoWidget::setupUI()
@@ -39,7 +82,6 @@ void VideoWidget::setupUI()
     m_videoWidget->setMinimumSize(300, 200);
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
-    m_dropLabel->setAlignment(Qt::AlignCenter);
     m_dropLabel->setMinimumSize(300, 200);
     
     m_timeLabel->setAlignment(Qt::AlignCenter);
@@ -199,17 +241,30 @@ void VideoWidget::applyTheme()
         "background-color: #000000; border: 1px solid %1; border-radius: 3px;"
     ).arg(theme->borderColor()));
     
-    // Apply theme to drop label
+    // Apply theme to drop label (now a button)
     m_dropLabel->setStyleSheet(QString(
-        "border: 2px dashed %1; "
-        "padding: 40px 20px; "
-        "color: %2; "
-        "font-size: 13px; "
-        "background-color: %3; "
-        "border-radius: 3px;"
+        "QPushButton { "
+        "   border: 2px dashed %1; "
+        "   padding: 40px 20px; "
+        "   color: %2; "
+        "   font-size: 13px; "
+        "   background-color: %3; "
+        "   border-radius: 3px; "
+        "   text-align: center; "
+        "} "
+        "QPushButton:hover { "
+        "   background-color: %4; "
+        "   border-color: %5; "
+        "} "
+        "QPushButton:pressed { "
+        "   background-color: %6; "
+        "}"
     ).arg(theme->borderColor())
      .arg(theme->secondaryTextColor())
-     .arg(theme->surfaceColor()));
+     .arg(theme->surfaceColor())
+     .arg(theme->backgroundColor())
+     .arg(theme->primaryColor())
+     .arg(theme->borderColor()));
     
     // Apply theme to controls
     m_playButton->setStyleSheet(theme->buttonStyleSheet());
@@ -235,4 +290,31 @@ void VideoWidget::applyTheme()
 void VideoWidget::onThemeChanged()
 {
     applyTheme();
+}
+
+void VideoWidget::onVideoWidgetClicked()
+{
+    // Open file dialog when video widget is clicked
+    QString fileName = QFileDialog::getOpenFileName(
+        this,
+        "Select Video File",
+        "",
+        "Video Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.m4v);;All Files (*)"
+    );
+    
+    if (!fileName.isEmpty()) {
+        loadVideo(fileName);
+    }
+}
+
+void VideoWidget::onVideoWidgetFileDropped(const QString &filePath)
+{
+    // Handle file dropped on video widget
+    loadVideo(filePath);
+}
+
+void VideoWidget::onDropLabelClicked()
+{
+    // Open file dialog when drop label is clicked (same functionality as video widget click)
+    onVideoWidgetClicked();
 }

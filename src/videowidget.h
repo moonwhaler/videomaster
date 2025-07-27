@@ -13,6 +13,26 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QStackedWidget>
+#include <QMouseEvent>
+#include <QFileDialog>
+
+// Custom QVideoWidget that handles drag & drop and click events
+class ClickableVideoWidget : public QVideoWidget
+{
+    Q_OBJECT
+
+public:
+    explicit ClickableVideoWidget(QWidget *parent = nullptr);
+
+signals:
+    void clicked();
+    void fileDropped(const QString &filePath);
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+};
 
 class VideoWidget : public QWidget
 {
@@ -42,6 +62,9 @@ private slots:
     void onPositionChanged(qint64 position);
     void onDurationChanged(qint64 duration);
     void onThemeChanged();
+    void onVideoWidgetClicked();
+    void onVideoWidgetFileDropped(const QString &filePath);
+    void onDropLabelClicked();
 
 private:
     void setupUI();
@@ -50,12 +73,12 @@ private:
     QVBoxLayout *m_layout;
     QLabel *m_titleLabel;
     QStackedWidget *m_stackedWidget;
-    QVideoWidget *m_videoWidget;
+    ClickableVideoWidget *m_videoWidget;
     QMediaPlayer *m_mediaPlayer;
     QPushButton *m_playButton;
     QSlider *m_positionSlider;
     QLabel *m_timeLabel;
-    QLabel *m_dropLabel;
+    QPushButton *m_dropLabel;
     
     QString m_currentFilePath;
 };

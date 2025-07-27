@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QDragEnterEvent>
+#include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QUrl>
@@ -15,14 +16,16 @@
 #include <QStackedWidget>
 #include <QMouseEvent>
 #include <QFileDialog>
+#include <QEvent>
+#include <QPaintEvent>
 
-// Custom QVideoWidget that handles drag & drop and click events
-class ClickableVideoWidget : public QVideoWidget
+// Transparent overlay widget that handles drag & drop and click events
+class VideoOverlay : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit ClickableVideoWidget(QWidget *parent = nullptr);
+    explicit VideoOverlay(QWidget *parent = nullptr);
 
 signals:
     void clicked();
@@ -31,7 +34,9 @@ signals:
 protected:
     void mousePressEvent(QMouseEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
 };
 
 class VideoWidget : public QWidget
@@ -56,14 +61,15 @@ signals:
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
     void onPlayPause();
     void onPositionChanged(qint64 position);
     void onDurationChanged(qint64 duration);
     void onThemeChanged();
-    void onVideoWidgetClicked();
-    void onVideoWidgetFileDropped(const QString &filePath);
+    void onOverlayClicked();
+    void onOverlayFileDropped(const QString &filePath);
     void onDropLabelClicked();
 
 private:
@@ -73,7 +79,9 @@ private:
     QVBoxLayout *m_layout;
     QLabel *m_titleLabel;
     QStackedWidget *m_stackedWidget;
-    ClickableVideoWidget *m_videoWidget;
+    QVideoWidget *m_videoWidget;
+    VideoOverlay *m_overlay;
+    QWidget *m_videoContainer;
     QMediaPlayer *m_mediaPlayer;
     QPushButton *m_playButton;
     QSlider *m_positionSlider;

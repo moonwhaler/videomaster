@@ -5,22 +5,25 @@
 #include <QCoreApplication>
 #include <QTimer>
 
-// ClickableVideoWidget implementation
-ClickableVideoWidget::ClickableVideoWidget(QWidget *parent)
-    : QVideoWidget(parent)
+// VideoOverlay implementation - transparent widget that handles drag & drop
+VideoOverlay::VideoOverlay(QWidget *parent)
+    : QWidget(parent)
 {
     setAcceptDrops(true);
+    setAttribute(Qt::WA_AcceptDrops, true);
+    setAttribute(Qt::WA_TransparentForMouseEvents, false); // We want to catch mouse events
+    setStyleSheet("background: transparent;"); // Make it transparent
 }
 
-void ClickableVideoWidget::mousePressEvent(QMouseEvent *event)
+void VideoOverlay::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         emit clicked();
     }
-    QVideoWidget::mousePressEvent(event);
+    QWidget::mousePressEvent(event);
 }
 
-void ClickableVideoWidget::dragEnterEvent(QDragEnterEvent *event)
+void VideoOverlay::dragEnterEvent(QDragEnterEvent *event)
 {
     if (event->mimeData()->hasUrls()) {
         QUrl url = event->mimeData()->urls().first();
@@ -34,11 +37,31 @@ void ClickableVideoWidget::dragEnterEvent(QDragEnterEvent *event)
     }
 }
 
-void ClickableVideoWidget::dropEvent(QDropEvent *event)
+void VideoOverlay::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (event->mimeData()->hasUrls()) {
+        QUrl url = event->mimeData()->urls().first();
+        QString filePath = url.toLocalFile();
+        QFileInfo fileInfo(filePath);
+        
+        QStringList videoExtensions = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"};
+        if (videoExtensions.contains(fileInfo.suffix().toLower())) {
+            event->acceptProposedAction();
+        }
+    }
+}
+
+void VideoOverlay::dropEvent(QDropEvent *event)
 {
     QUrl url = event->mimeData()->urls().first();
     QString filePath = url.toLocalFile();
     emit fileDropped(filePath);
+}
+
+void VideoOverlay::paintEvent(QPaintEvent *event)
+{
+    // Do nothing - keep it transparent
+    Q_UNUSED(event);
 }
 
 VideoWidget::VideoWidget(const QString &title, QWidget *parent)
@@ -46,7 +69,9 @@ VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     , m_layout(new QVBoxLayout(this))
     , m_titleLabel(new QLabel(title, this))
     , m_stackedWidget(new QStackedWidget(this))
-    , m_videoWidget(new ClickableVideoWidget(this))
+    , m_videoWidget(new QVideoWidget(this))
+    , m_overlay(new VideoOverlay(this))
+    , m_videoContainer(nullptr)
     , m_mediaPlayer(new QMediaPlayer(this))
     , m_playButton(new QPushButton("Play", this))
     , m_positionSlider(new QSlider(Qt::Horizontal, this))
@@ -67,12 +92,15 @@ VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, &VideoWidget::onDurationChanged);
     connect(m_positionSlider, &QSlider::sliderMoved, this, &VideoWidget::seek);
     
-    // Connect ClickableVideoWidget signals
-    connect(m_videoWidget, &ClickableVideoWidget::clicked, this, &VideoWidget::onVideoWidgetClicked);
-    connect(m_videoWidget, &ClickableVideoWidget::fileDropped, this, &VideoWidget::onVideoWidgetFileDropped);
+    // Connect VideoOverlay signals
+    connect(m_overlay, &VideoOverlay::clicked, this, &VideoWidget::onOverlayClicked);
+    connect(m_overlay, &VideoOverlay::fileDropped, this, &VideoWidget::onOverlayFileDropped);
     
     // Connect drop label click
     connect(m_dropLabel, &QPushButton::clicked, this, &VideoWidget::onDropLabelClicked);
+    
+    // Install event filter on container to handle resize events
+    m_videoContainer->installEventFilter(this);
 }
 
 void VideoWidget::setupUI()
@@ -93,10 +121,22 @@ void VideoWidget::setupUI()
     controlsLayout->addWidget(m_positionSlider, 1);
     controlsLayout->addWidget(m_timeLabel);
     
-    // Set up the stacked widget to hold either drop label or video widget
+    // Create a container widget for video widget and overlay
+    m_videoContainer = new QWidget();
+    m_videoContainer->setMinimumSize(300, 200);
+    
+    // Set up the stacked widget to hold either drop label or video container
     m_stackedWidget->addWidget(m_dropLabel);
-    m_stackedWidget->addWidget(m_videoWidget);
+    m_stackedWidget->addWidget(m_videoContainer);
     m_stackedWidget->setCurrentWidget(m_dropLabel);
+    
+    // Position video widget and overlay in the container
+    m_videoWidget->setParent(m_videoContainer);
+    m_overlay->setParent(m_videoContainer);
+    
+    // Make overlay cover the entire video widget
+    m_videoWidget->setGeometry(0, 0, 300, 200);
+    m_overlay->setGeometry(0, 0, 300, 200);
     
     m_layout->setContentsMargins(0, 0, 0, 0);
     m_layout->setSpacing(4);
@@ -137,8 +177,8 @@ void VideoWidget::loadVideo(const QString &filePath)
     m_currentFilePath = filePath;
     m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
     
-    // Switch to video widget in stacked widget
-    m_stackedWidget->setCurrentWidget(m_videoWidget);
+    // Switch to video container in stacked widget
+    m_stackedWidget->setCurrentWidget(m_videoContainer);
     m_playButton->setEnabled(true);
     m_positionSlider->setEnabled(true);
     
@@ -292,9 +332,9 @@ void VideoWidget::onThemeChanged()
     applyTheme();
 }
 
-void VideoWidget::onVideoWidgetClicked()
+void VideoWidget::onOverlayClicked()
 {
-    // Open file dialog when video widget is clicked
+    // Open file dialog when overlay is clicked
     QString fileName = QFileDialog::getOpenFileName(
         this,
         "Select Video File",
@@ -307,14 +347,69 @@ void VideoWidget::onVideoWidgetClicked()
     }
 }
 
-void VideoWidget::onVideoWidgetFileDropped(const QString &filePath)
+void VideoWidget::onOverlayFileDropped(const QString &filePath)
 {
-    // Handle file dropped on video widget
+    // Handle file dropped on overlay
     loadVideo(filePath);
 }
 
 void VideoWidget::onDropLabelClicked()
 {
-    // Open file dialog when drop label is clicked (same functionality as video widget click)
-    onVideoWidgetClicked();
+    // Open file dialog when drop label is clicked (same functionality as overlay click)
+    onOverlayClicked();
 }
+
+bool VideoWidget::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == m_videoContainer && event->type() == QEvent::Resize) {
+        // Handle container resize - keep overlay positioned over video widget
+        if (m_videoWidget && m_overlay) {
+            QRect containerRect = m_videoContainer->rect();
+            m_videoWidget->setGeometry(containerRect);
+            m_overlay->setGeometry(containerRect);
+        }
+    } else if (obj == m_videoWidget) {
+        if (event->type() == QEvent::DragEnter) {
+            QDragEnterEvent *dragEvent = static_cast<QDragEnterEvent*>(event);
+            
+            if (dragEvent->mimeData()->hasUrls()) {
+                QUrl url = dragEvent->mimeData()->urls().first();
+                QString filePath = url.toLocalFile();
+                QFileInfo fileInfo(filePath);
+                
+                QStringList videoExtensions = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"};
+                if (videoExtensions.contains(fileInfo.suffix().toLower())) {
+                    dragEvent->acceptProposedAction();
+                    return true; // Event handled
+                }
+            }
+        } else if (event->type() == QEvent::Drop) {
+            QDropEvent *dropEvent = static_cast<QDropEvent*>(event);
+            
+            if (dropEvent->mimeData()->hasUrls()) {
+                QUrl url = dropEvent->mimeData()->urls().first();
+                QString filePath = url.toLocalFile();
+                loadVideo(filePath);
+                return true; // Event handled
+            }
+        } else if (event->type() == QEvent::DragMove) {
+            QDragMoveEvent *dragMoveEvent = static_cast<QDragMoveEvent*>(event);
+            
+            if (dragMoveEvent->mimeData()->hasUrls()) {
+                QUrl url = dragMoveEvent->mimeData()->urls().first();
+                QString filePath = url.toLocalFile();
+                QFileInfo fileInfo(filePath);
+                
+                QStringList videoExtensions = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"};
+                if (videoExtensions.contains(fileInfo.suffix().toLower())) {
+                    dragMoveEvent->acceptProposedAction();
+                    return true; // Event handled
+                }
+            }
+        }
+    }
+    
+    // Standard event processing
+    return QWidget::eventFilter(obj, event);
+}
+

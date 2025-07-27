@@ -4,10 +4,14 @@
 #include <QTime>
 #include <QCoreApplication>
 #include <QTimer>
+#include <QPainter>
+#include <QFont>
 
 // VideoOverlay implementation - transparent widget that handles drag & drop
 VideoOverlay::VideoOverlay(QWidget *parent)
     : QWidget(parent)
+    , m_isDragActive(false)
+    , m_isValidDrag(false)
 {
     setAcceptDrops(true);
     setAttribute(Qt::WA_AcceptDrops, true);
@@ -25,6 +29,9 @@ void VideoOverlay::mousePressEvent(QMouseEvent *event)
 
 void VideoOverlay::dragEnterEvent(QDragEnterEvent *event)
 {
+    m_isDragActive = true;
+    m_isValidDrag = false;
+    
     if (event->mimeData()->hasUrls()) {
         QUrl url = event->mimeData()->urls().first();
         QString filePath = url.toLocalFile();
@@ -32,14 +39,18 @@ void VideoOverlay::dragEnterEvent(QDragEnterEvent *event)
         
         QStringList videoExtensions = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"};
         if (videoExtensions.contains(fileInfo.suffix().toLower())) {
+            m_isValidDrag = true;
             event->acceptProposedAction();
         }
     }
+    
+    update(); // Trigger repaint to show visual feedback
 }
 
 void VideoOverlay::dragMoveEvent(QDragMoveEvent *event)
 {
-    if (event->mimeData()->hasUrls()) {
+    // Continue accepting if it's a valid drag
+    if (m_isValidDrag && event->mimeData()->hasUrls()) {
         QUrl url = event->mimeData()->urls().first();
         QString filePath = url.toLocalFile();
         QFileInfo fileInfo(filePath);
@@ -51,8 +62,20 @@ void VideoOverlay::dragMoveEvent(QDragMoveEvent *event)
     }
 }
 
+void VideoOverlay::dragLeaveEvent(QDragLeaveEvent *event)
+{
+    m_isDragActive = false;
+    m_isValidDrag = false;
+    update(); // Trigger repaint to hide visual feedback
+    QWidget::dragLeaveEvent(event);
+}
+
 void VideoOverlay::dropEvent(QDropEvent *event)
 {
+    m_isDragActive = false;
+    m_isValidDrag = false;
+    update(); // Trigger repaint to hide visual feedback
+    
     QUrl url = event->mimeData()->urls().first();
     QString filePath = url.toLocalFile();
     emit fileDropped(filePath);
@@ -60,7 +83,50 @@ void VideoOverlay::dropEvent(QDropEvent *event)
 
 void VideoOverlay::paintEvent(QPaintEvent *event)
 {
-    // Do nothing - keep it transparent
+    if (m_isDragActive) {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        
+        // Get theme colors
+        ThemeManager* theme = ThemeManager::instance();
+        
+        // Semi-transparent overlay
+        QColor overlayColor;
+        QColor borderColor;
+        if (m_isValidDrag) {
+            QColor successColor = QColor(theme->successColor());
+            overlayColor = QColor(successColor.red(), successColor.green(), successColor.blue(), 80);
+            borderColor = QColor(successColor.red(), successColor.green(), successColor.blue(), 180);
+        } else {
+            QColor dangerColor = QColor(theme->dangerColor());
+            overlayColor = QColor(dangerColor.red(), dangerColor.green(), dangerColor.blue(), 80);
+            borderColor = QColor(dangerColor.red(), dangerColor.green(), dangerColor.blue(), 180);
+        }
+        
+        painter.fillRect(rect(), overlayColor);
+        
+        // Dashed border
+        QPen borderPen;
+        borderPen.setColor(borderColor);
+        borderPen.setWidth(3);
+        borderPen.setStyle(Qt::DashLine);
+        painter.setPen(borderPen);
+        painter.drawRect(rect().adjusted(2, 2, -2, -2));
+        
+        // Text in center
+        painter.setPen(QColor(theme->textColor())); // Use theme text color
+        painter.setFont(QFont("Arial", 14, QFont::Bold));
+        
+        QString message;
+        if (m_isValidDrag) {
+            message = "Drop video file here";
+        } else {
+            message = "Invalid file type";
+        }
+        
+        painter.drawText(rect(), Qt::AlignCenter, message);
+    }
+    
     Q_UNUSED(event);
 }
 

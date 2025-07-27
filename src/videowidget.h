@@ -8,6 +8,7 @@
 #include <QVBoxLayout>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
+#include <QDragLeaveEvent>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QUrl>
@@ -35,8 +36,13 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
+
+private:
+    bool m_isDragActive;
+    bool m_isValidDrag;
 };
 
 class VideoWidget : public QWidget

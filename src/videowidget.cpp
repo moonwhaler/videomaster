@@ -9,6 +9,7 @@ VideoWidget::VideoWidget(const QString &title, QWidget *parent)
     : QWidget(parent)
     , m_layout(new QVBoxLayout(this))
     , m_titleLabel(new QLabel(title, this))
+    , m_stackedWidget(new QStackedWidget(this))
     , m_videoWidget(new QVideoWidget(this))
     , m_mediaPlayer(new QMediaPlayer(this))
     , m_playButton(new QPushButton("Play", this))
@@ -50,14 +51,17 @@ void VideoWidget::setupUI()
     controlsLayout->addWidget(m_positionSlider, 1);
     controlsLayout->addWidget(m_timeLabel);
     
+    // Set up the stacked widget to hold either drop label or video widget
+    m_stackedWidget->addWidget(m_dropLabel);
+    m_stackedWidget->addWidget(m_videoWidget);
+    m_stackedWidget->setCurrentWidget(m_dropLabel);
+    
     m_layout->setContentsMargins(0, 0, 0, 0);
     m_layout->setSpacing(4);
     m_layout->addWidget(m_titleLabel);
-    m_layout->addWidget(m_dropLabel);
-    m_layout->addWidget(m_videoWidget);
+    m_layout->addWidget(m_stackedWidget, 1);
     m_layout->addLayout(controlsLayout);
     
-    m_videoWidget->hide();
     m_playButton->setEnabled(false);
     m_positionSlider->setEnabled(false);
     
@@ -91,8 +95,8 @@ void VideoWidget::loadVideo(const QString &filePath)
     m_currentFilePath = filePath;
     m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
     
-    m_dropLabel->hide();
-    m_videoWidget->show();
+    // Switch to video widget in stacked widget
+    m_stackedWidget->setCurrentWidget(m_videoWidget);
     m_playButton->setEnabled(true);
     m_positionSlider->setEnabled(true);
     

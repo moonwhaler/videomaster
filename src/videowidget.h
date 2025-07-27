@@ -12,6 +12,7 @@
 #include <QUrl>
 #include <QPushButton>
 #include <QSlider>
+#include <QStackedWidget>
 
 class VideoWidget : public QWidget
 {
@@ -48,6 +49,7 @@ private:
     
     QVBoxLayout *m_layout;
     QLabel *m_titleLabel;
+    QStackedWidget *m_stackedWidget;
     QVideoWidget *m_videoWidget;
     QMediaPlayer *m_mediaPlayer;
     QPushButton *m_playButton;

@@ -126,6 +126,19 @@ void MainWindow::setupComparisonTab()
     m_autoCompareButton->setMinimumWidth(100);
     m_autoCompareButton->setStyleSheet(theme->successButtonStyleSheet());
     
+    // Relative offset control
+    QLabel *offsetLabel = new QLabel("Offset A→B:");
+    offsetLabel->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
+    offsetLabel->setToolTip("Positive: Video A starts later than Video B\nNegative: Video A starts earlier than Video B");
+    
+    m_relativeOffsetSpinBox = new QSpinBox();
+    m_relativeOffsetSpinBox->setRange(-999999, 999999);
+    m_relativeOffsetSpinBox->setValue(0);
+    m_relativeOffsetSpinBox->setSuffix(" ms");
+    m_relativeOffsetSpinBox->setMinimumWidth(80);
+    m_relativeOffsetSpinBox->setStyleSheet(theme->lineEditStyleSheet());
+    m_relativeOffsetSpinBox->setToolTip("Positive: Video A starts later than Video B\nNegative: Video A starts earlier than Video B");
+    
     // Timeline label
     QLabel *timelineLabel = new QLabel("Timeline:");
     timelineLabel->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
@@ -154,6 +167,8 @@ void MainWindow::setupComparisonTab()
     
     controlLayout->addWidget(m_syncButton);
     controlLayout->addWidget(m_autoCompareButton);
+    controlLayout->addWidget(offsetLabel);
+    controlLayout->addWidget(m_relativeOffsetSpinBox);
     controlLayout->addWidget(timelineLabel);
     controlLayout->addWidget(m_timestampSlider, 1);
     controlLayout->addWidget(m_timestampLabel);
@@ -297,6 +312,22 @@ void MainWindow::setupComparisonTab()
     connect(m_leftChaptersList, &QListWidget::itemClicked, this, &MainWindow::onChapterSelected);
     connect(m_rightChaptersList, &QListWidget::itemClicked, this, &MainWindow::onChapterSelected);
     connect(m_prevChapterButton, &QPushButton::clicked, this, &MainWindow::onPreviousChapter);
+    
+    // Connect relative offset control
+    connect(m_relativeOffsetSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            [this](int value) { 
+                // Positive offset means Video A starts later (is delayed) relative to Video B
+                // So Video A gets positive offset, Video B gets 0
+                m_comparator->setVideoOffset(0, value);   // Video A offset
+                m_comparator->setVideoOffset(1, 0);       // Video B baseline (no offset)
+                // Clear previous comparison results when offset changes
+                if (value == 0) {
+                    m_comparisonResultLabel->setText("Videos synchronized. Click 'Auto Compare' to analyze similarity.");
+                } else {
+                    QString direction = (value > 0) ? "later" : "earlier";
+                    m_comparisonResultLabel->setText(QString("Video A starts %1ms %2 than Video B. Click 'Auto Compare' to re-analyze.").arg(qAbs(value)).arg(direction));
+                }
+            });
     connect(m_nextChapterButton, &QPushButton::clicked, this, &MainWindow::onNextChapter);
 }
 
@@ -538,32 +569,57 @@ void MainWindow::onSyncPlayback()
         m_syncButton->setText("Sync Playback");
         m_isPlaying = false;
     } else {
-        // Currently paused, so sync positions and play both
-        qint64 position = m_leftVideoWidget->position();
-        m_rightVideoWidget->seek(position);
+        // Currently paused, so sync positions with offset applied and play both
+        qint64 basePosition = m_leftVideoWidget->position();
+        
+        // Apply offset: positive offset means Video A starts later than Video B
+        qint64 relativeOffset = m_relativeOffsetSpinBox->value();
+        qint64 videoAPosition = basePosition;
+        qint64 videoBPosition = basePosition - relativeOffset;  // B needs to be ahead if A is delayed
+        
+        // Ensure positions are within bounds
+        videoAPosition = qMax(0LL, videoAPosition);
+        videoBPosition = qMax(0LL, videoBPosition);
+        
+        // Seek both videos to their offset-adjusted positions
+        m_leftVideoWidget->seek(videoAPosition);
+        m_rightVideoWidget->seek(videoBPosition);
         
         m_leftVideoWidget->play();
         m_rightVideoWidget->play();
         m_syncButton->setText("Sync Pause");
         m_isPlaying = true;
+        
+        qDebug() << "Sync playback with offset:" << relativeOffset << "ms";
+        qDebug() << "  Video A position:" << videoAPosition << "ms";
+        qDebug() << "  Video B position:" << videoBPosition << "ms";
     }
 }
 
 void MainWindow::onSeekToTimestamp()
 {
-    qint64 position = m_timestampSlider->value();
+    qint64 basePosition = m_timestampSlider->value();
     
-    // Seek both videos to the same position immediately
+    // Apply offset: positive offset means Video A starts later than Video B
+    qint64 relativeOffset = m_relativeOffsetSpinBox->value();
+    qint64 videoAPosition = basePosition;
+    qint64 videoBPosition = basePosition - relativeOffset;  // B needs to be ahead if A is delayed
+    
+    // Ensure positions are within bounds
+    videoAPosition = qMax(0LL, videoAPosition);
+    videoBPosition = qMax(0LL, videoBPosition);
+    
+    // Seek both videos to their offset-adjusted positions
     if (!m_leftVideoWidget->currentFilePath().isEmpty()) {
-        m_leftVideoWidget->seek(position);
+        m_leftVideoWidget->seek(videoAPosition);
     }
     if (!m_rightVideoWidget->currentFilePath().isEmpty()) {
-        m_rightVideoWidget->seek(position);
+        m_rightVideoWidget->seek(videoBPosition);
     }
     
-    // Update timestamp label
-    QTime time = QTime::fromMSecsSinceStartOfDay(position);
-    m_timestampLabel->setText(QString("Timestamp: %1").arg(time.toString("mm:ss")));
+    // Update timestamp label (show the base position, not the offset positions) 
+    QTime time = QTime::fromMSecsSinceStartOfDay(basePosition);
+    m_timestampLabel->setText(time.toString("mm:ss"));
 }
 
 void MainWindow::onVideoPositionChanged(qint64 position)
@@ -571,16 +627,20 @@ void MainWindow::onVideoPositionChanged(qint64 position)
     // Update the timestamp slider when videos are playing (but don't trigger seeking)
     // Only update if the slider is not currently being dragged by the user
     if (!m_timestampSlider->isSliderDown()) {
+        // Convert the actual video position back to base timeline position
+        // We use Video A position as the base since that's our reference
+        qint64 basePosition = position; // Video A position is the base
+        
         m_timestampSlider->blockSignals(true);
-        m_timestampSlider->setValue(position);
+        m_timestampSlider->setValue(basePosition);
         m_timestampSlider->blockSignals(false);
         
         // Update timestamp label
-        QTime time = QTime::fromMSecsSinceStartOfDay(position);
-        m_timestampLabel->setText(QString("Timestamp: %1").arg(time.toString("mm:ss")));
+        QTime time = QTime::fromMSecsSinceStartOfDay(basePosition);
+        m_timestampLabel->setText(time.toString("mm:ss"));
         
         // Update current chapter display
-        updateCurrentChapterDisplay(position);
+        updateCurrentChapterDisplay(basePosition);
     }
 }
 
@@ -1259,21 +1319,32 @@ void MainWindow::onChapterSelected()
     QListWidgetItem *selectedItem = senderList->currentItem();
     if (!selectedItem) return;
     
-    qint64 timestamp = selectedItem->data(Qt::UserRole).toLongLong();
+    qint64 baseTimestamp = selectedItem->data(Qt::UserRole).toLongLong();
     
-    // Seek both videos to the chapter timestamp
+    // Apply offset: positive offset means Video A starts later than Video B
+    qint64 relativeOffset = m_relativeOffsetSpinBox->value();
+    qint64 videoATimestamp = baseTimestamp;
+    qint64 videoBTimestamp = baseTimestamp - relativeOffset;
+    
+    // Ensure timestamps are within bounds
+    videoATimestamp = qMax(0LL, videoATimestamp);
+    videoBTimestamp = qMax(0LL, videoBTimestamp);
+    
+    // Seek both videos to their offset-adjusted timestamps
     if (!m_leftVideoWidget->currentFilePath().isEmpty()) {
-        m_leftVideoWidget->seek(timestamp);
+        m_leftVideoWidget->seek(videoATimestamp);
     }
     if (!m_rightVideoWidget->currentFilePath().isEmpty()) {
-        m_rightVideoWidget->seek(timestamp);
+        m_rightVideoWidget->seek(videoBTimestamp);
     }
     
     // Update timestamp slider
-    m_timestampSlider->setValue(timestamp);
+    m_timestampSlider->blockSignals(true);
+    m_timestampSlider->setValue(baseTimestamp);
+    m_timestampSlider->blockSignals(false);
     
     // Update current chapter display
-    updateCurrentChapterDisplay(timestamp);
+    updateCurrentChapterDisplay(baseTimestamp);
 }
 
 void MainWindow::onPreviousChapter()
@@ -1299,30 +1370,41 @@ void MainWindow::jumpToCurrentChapter()
 {
     if (m_currentChapterIndex < 0) return;
     
-    qint64 timestamp = 0;
+    qint64 baseTimestamp = 0;
     
     // Prefer left video chapters, fall back to right video chapters
     if (m_currentChapterIndex < m_leftVideoChapters.size()) {
-        timestamp = m_leftVideoChapters[m_currentChapterIndex].startTimeMs;
+        baseTimestamp = m_leftVideoChapters[m_currentChapterIndex].startTimeMs;
     } else if (m_currentChapterIndex < m_rightVideoChapters.size()) {
-        timestamp = m_rightVideoChapters[m_currentChapterIndex].startTimeMs;
+        baseTimestamp = m_rightVideoChapters[m_currentChapterIndex].startTimeMs;
     } else {
         return; // No valid chapter
     }
     
-    // Seek both videos
+    // Apply offset: positive offset means Video A starts later than Video B
+    qint64 relativeOffset = m_relativeOffsetSpinBox->value();
+    qint64 videoATimestamp = baseTimestamp;
+    qint64 videoBTimestamp = baseTimestamp - relativeOffset;
+    
+    // Ensure timestamps are within bounds
+    videoATimestamp = qMax(0LL, videoATimestamp);
+    videoBTimestamp = qMax(0LL, videoBTimestamp);
+    
+    // Seek both videos to their offset-adjusted timestamps
     if (!m_leftVideoWidget->currentFilePath().isEmpty()) {
-        m_leftVideoWidget->seek(timestamp);
+        m_leftVideoWidget->seek(videoATimestamp);
     }
     if (!m_rightVideoWidget->currentFilePath().isEmpty()) {
-        m_rightVideoWidget->seek(timestamp);
+        m_rightVideoWidget->seek(videoBTimestamp);
     }
     
     // Update timestamp slider
-    m_timestampSlider->setValue(timestamp);
+    m_timestampSlider->blockSignals(true);
+    m_timestampSlider->setValue(baseTimestamp);
+    m_timestampSlider->blockSignals(false);
     
     // Update display
-    updateCurrentChapterDisplay(timestamp);
+    updateCurrentChapterDisplay(baseTimestamp);
     updateChapterNavigation();
 }
 

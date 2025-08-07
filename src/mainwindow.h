@@ -114,6 +114,9 @@ private:
     QProgressBar *m_comparisonProgressBar;
     QLabel *m_comparisonResultLabel;
     
+    // Relative offset control
+    QSpinBox *m_relativeOffsetSpinBox;
+    
     // Chapter navigation controls
     QListWidget *m_leftChaptersList;
     QListWidget *m_rightChaptersList;

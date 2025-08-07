@@ -15,6 +15,7 @@ public:
     explicit VideoComparator(QObject *parent = nullptr);
     
     void setVideo(int index, const QString &filePath);
+    void setVideoOffset(int index, qint64 offsetMs);
     void startComparison();
     void stopComparison();
     void startAutoComparison();  // New method for automatic comparison
@@ -38,6 +39,10 @@ private slots:
 private:
     QString m_videoPath1;
     QString m_videoPath2;
+    qint64 m_videoAOffset;  // Offset in milliseconds for Video A
+    qint64 m_videoBOffset;  // Offset in milliseconds for Video B
+    qint64 m_videoDuration1;  // Duration of Video A
+    qint64 m_videoDuration2;  // Duration of Video B
     QTimer *m_comparisonTimer;
     QMutex m_mutex;
     bool m_isComparing;

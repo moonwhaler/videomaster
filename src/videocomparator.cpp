@@ -7,6 +7,10 @@
 
 VideoComparator::VideoComparator(QObject *parent)
     : QObject(parent)
+    , m_videoAOffset(0)
+    , m_videoBOffset(0)
+    , m_videoDuration1(0)
+    , m_videoDuration2(0)
     , m_comparisonTimer(new QTimer(this))
     , m_isComparing(false)
     , m_isAutoComparing(false)
@@ -22,16 +26,33 @@ void VideoComparator::setVideo(int index, const QString &filePath)
 {
     QMutexLocker locker(&m_mutex);
     
+    FFmpegHandler handler;
+    
     if (index == 0) {
         m_videoPath1 = filePath;
+        m_videoDuration1 = handler.getVideoDuration(filePath);
     } else if (index == 1) {
         m_videoPath2 = filePath;
+        m_videoDuration2 = handler.getVideoDuration(filePath);
     }
     
-    // If both videos are loaded, get duration for comparison progress
+    // If both videos are loaded, set duration for comparison progress
+    // Use the shorter duration to avoid going beyond either video
     if (!m_videoPath1.isEmpty() && !m_videoPath2.isEmpty()) {
-        FFmpegHandler handler;
-        m_videoDuration = handler.getVideoDuration(m_videoPath1);
+        m_videoDuration = qMin(m_videoDuration1, m_videoDuration2);
+        qDebug() << "Video durations - A:" << m_videoDuration1 << "ms, B:" << m_videoDuration2 << "ms";
+        qDebug() << "Using comparison duration:" << m_videoDuration << "ms";
+    }
+}
+
+void VideoComparator::setVideoOffset(int index, qint64 offsetMs)
+{
+    QMutexLocker locker(&m_mutex);
+    
+    if (index == 0) {
+        m_videoAOffset = offsetMs;
+    } else if (index == 1) {
+        m_videoBOffset = offsetMs;
     }
 }
 
@@ -95,9 +116,24 @@ double VideoComparator::compareFramesAtTimestamp(qint64 timestamp)
 {
     FFmpegHandler handler;
     
-    // Extract frames from both videos at the given timestamp
-    QImage frame1 = handler.extractFrame(m_videoPath1, timestamp);
-    QImage frame2 = handler.extractFrame(m_videoPath2, timestamp);
+    // Apply offsets to timestamps
+    qint64 timestamp1 = timestamp + m_videoAOffset;
+    qint64 timestamp2 = timestamp + m_videoBOffset;
+    
+    // Ensure timestamps are within valid bounds
+    timestamp1 = qMax(0LL, qMin(timestamp1, m_videoDuration1 - 1));
+    timestamp2 = qMax(0LL, qMin(timestamp2, m_videoDuration2 - 1));
+    
+    // Debug logging to show actual timestamps being used
+    if (m_videoAOffset != 0 || m_videoBOffset != 0) {
+        qDebug() << "Comparing frames at original:" << timestamp << "ms";
+        qDebug() << "  Video A: offset" << m_videoAOffset << "ms -> timestamp" << timestamp1 << "ms";
+        qDebug() << "  Video B: offset" << m_videoBOffset << "ms -> timestamp" << timestamp2 << "ms";
+    }
+    
+    // Extract frames from both videos at the adjusted timestamps
+    QImage frame1 = handler.extractFrame(m_videoPath1, timestamp1);
+    QImage frame2 = handler.extractFrame(m_videoPath2, timestamp2);
     
     if (frame1.isNull() || frame2.isNull()) {
         return 0.0; // Cannot compare null frames
@@ -152,9 +188,29 @@ void VideoComparator::startAutoComparison()
     m_autoSimilarityResults.clear();
     
     // Generate strategic sampling timestamps
-    FFmpegHandler handler;
-    qint64 duration = handler.getVideoDuration(m_videoPath1);
-    m_autoSampleTimestamps = generateSampleTimestamps(duration);
+    // Calculate effective duration considering offsets
+    qint64 effectiveStartTime = qMax(0LL, qMax(-m_videoAOffset, -m_videoBOffset));
+    qint64 effectiveEndTime = qMin(m_videoDuration1 - m_videoAOffset, m_videoDuration2 - m_videoBOffset);
+    qint64 effectiveDuration = qMax(0LL, effectiveEndTime - effectiveStartTime);
+    
+    qDebug() << "Offset-aware duration calculation:";
+    qDebug() << "  Video A offset:" << m_videoAOffset << "ms, duration:" << m_videoDuration1 << "ms";
+    qDebug() << "  Video B offset:" << m_videoBOffset << "ms, duration:" << m_videoDuration2 << "ms";
+    qDebug() << "  Effective start:" << effectiveStartTime << "ms, end:" << effectiveEndTime << "ms";
+    qDebug() << "  Effective duration:" << effectiveDuration << "ms";
+    
+    if (effectiveDuration <= 0) {
+        qWarning() << "Invalid effective duration due to offsets. Cannot perform comparison.";
+        m_isAutoComparing = false;
+        emit autoComparisonComplete(0.0, false, "Cannot compare: offsets result in no overlapping video content.");
+        return;
+    }
+    
+    m_autoSampleTimestamps = generateSampleTimestamps(effectiveDuration);
+    // Adjust timestamps to start from effective start time
+    for (int i = 0; i < m_autoSampleTimestamps.size(); ++i) {
+        m_autoSampleTimestamps[i] += effectiveStartTime;
+    }
     
     qDebug() << "Starting auto comparison with" << m_autoSampleTimestamps.size() << "samples";
     

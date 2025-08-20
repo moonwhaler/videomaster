@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QThread>
 #include <QMutex>
+#include <QMap>
 
 class VideoComparator : public QObject
 {
@@ -19,6 +20,7 @@ public:
     void startComparison();
     void stopComparison();
     void startAutoComparison();  // New method for automatic comparison
+    void findOptimalOffset();    // New method for automatic offset detection
     
     struct ComparisonResult {
         double similarity;
@@ -31,10 +33,12 @@ signals:
     void comparisonComplete(const QList<ComparisonResult> &results);
     void frameCompared(qint64 timestamp, double similarity);
     void autoComparisonComplete(double overallSimilarity, bool videosIdentical, const QString &summary);
+    void optimalOffsetFound(qint64 optimalOffset, double confidence);
 
 private slots:
     void performFrameComparison();
     void performAutoComparison();
+    void performOffsetDetection();
 
 private:
     QString m_videoPath1;
@@ -55,10 +59,19 @@ private:
     int m_currentSampleIndex;
     QList<double> m_autoSimilarityResults;
     
+    // Offset detection state
+    bool m_isDetectingOffset;
+    QList<qint64> m_offsetCandidates;
+    int m_currentOffsetIndex;
+    QList<qint64> m_offsetTestTimestamps;
+    QMap<qint64, double> m_offsetSimilarityMap;
+    
     double compareFramesAtTimestamp(qint64 timestamp);
     QList<qint64> generateSampleTimestamps(qint64 duration, int sampleCount = 15);
     double calculateOverallSimilarity(const QList<double> &similarities);
     bool determineIfIdentical(double overallSimilarity, const QList<double> &similarities);
+    QList<qint64> generateOffsetCandidates(qint64 maxOffsetMs = 5000, int stepMs = 25);
+    double testOffsetSimilarity(qint64 offset, const QList<qint64> &testTimestamps);
     QList<ComparisonResult> m_results;
 };
 

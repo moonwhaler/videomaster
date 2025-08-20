@@ -17,6 +17,8 @@ VideoComparator::VideoComparator(QObject *parent)
     , m_currentTimestamp(0)
     , m_videoDuration(0)
     , m_currentSampleIndex(0)
+    , m_isDetectingOffset(false)
+    , m_currentOffsetIndex(0)
 {
     connect(m_comparisonTimer, &QTimer::timeout, this, &VideoComparator::performFrameComparison);
     m_comparisonTimer->setInterval(100); // Compare every 100ms during playback
@@ -266,44 +268,48 @@ QList<qint64> VideoComparator::generateSampleTimestamps(qint64 duration, int sam
         return timestamps;
     }
     
-    // Strategic sampling points:
-    // 1. Beginning (first 5 seconds)
-    timestamps.append(1000);   // 1 second
-    timestamps.append(3000);   // 3 seconds
-    timestamps.append(5000);   // 5 seconds
+    // Optimized for early video content analysis (first quarter only)
+    // Skip very beginning to avoid black frames/logos
+    qint64 startTime = 2000;  // Start at 2 seconds
+    qint64 endTime = qMin(duration - 1000, duration);  // Safe end time
     
-    // 2. End (last 5 seconds)
-    timestamps.append(duration - 5000);  // 5 seconds from end
-    timestamps.append(duration - 3000);  // 3 seconds from end
-    timestamps.append(duration - 1000);  // 1 second from end
+    if (endTime <= startTime) {
+        // Very short segment
+        timestamps.append((startTime + endTime) / 2);
+        return timestamps;
+    }
     
-    // 3. Middle point
-    timestamps.append(duration / 2);
+    // Strategic early content sampling:
     
-    // 4. Quarter points
-    timestamps.append(duration / 4);
-    timestamps.append(3 * duration / 4);
+    // 1. Early content samples (where sync differences are most obvious)
+    timestamps.append(startTime);              // 2 seconds
+    timestamps.append(startTime + 3000);       // 5 seconds  
+    timestamps.append(startTime + 8000);       // 10 seconds
+    timestamps.append(startTime + 15000);      // 17 seconds
     
-    // 5. Random sampling points for remaining samples
+    // 2. Mid-section samples (structural content)
+    timestamps.append(duration / 3);           // One third
+    timestamps.append(duration / 2);           // Half way
+    timestamps.append(2 * duration / 3);       // Two thirds
+    
+    // 3. Additional evenly distributed samples
     int remainingSamples = sampleCount - timestamps.size();
     if (remainingSamples > 0) {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<qint64> dist(5000, duration - 5000);
-        
-        for (int i = 0; i < remainingSamples; ++i) {
-            qint64 randomTime = dist(gen);
-            timestamps.append(randomTime);
+        qint64 step = (endTime - startTime) / (remainingSamples + 1);
+        for (int i = 1; i <= remainingSamples; ++i) {
+            qint64 timestamp = startTime + i * step;
+            timestamps.append(timestamp);
         }
     }
     
-    // Sort timestamps for logical progression
+    // Sort and remove duplicates
     std::sort(timestamps.begin(), timestamps.end());
+    timestamps.erase(std::unique(timestamps.begin(), timestamps.end()), timestamps.end());
     
-    // Remove duplicates and ensure all timestamps are valid
+    // Ensure all timestamps are valid
     QList<qint64> validTimestamps;
     for (qint64 ts : timestamps) {
-        if (ts > 0 && ts < duration && !validTimestamps.contains(ts)) {
+        if (ts >= startTime && ts <= endTime) {
             validTimestamps.append(ts);
         }
     }
@@ -354,3 +360,137 @@ bool VideoComparator::determineIfIdentical(double overallSimilarity, const QList
     double highSimilarityRatio = static_cast<double>(highSimilarityCount) / similarities.size();
     return highSimilarityRatio >= HIGH_SIMILARITY_RATIO;
 }
+
+void VideoComparator::findOptimalOffset()
+{
+    if (m_videoPath1.isEmpty() || m_videoPath2.isEmpty()) {
+        qWarning() << "Cannot find optimal offset: both videos must be loaded";
+        return;
+    }
+    
+    QMutexLocker locker(&m_mutex);
+    
+    if (m_isComparing || m_isAutoComparing || m_isDetectingOffset) {
+        qWarning() << "Another operation is already in progress";
+        return;
+    }
+    
+    m_isDetectingOffset = true;
+    m_currentOffsetIndex = 0;
+    m_offsetSimilarityMap.clear();
+    
+    // Fast, precise detection: ±5 seconds in 25ms steps
+    m_offsetCandidates = generateOffsetCandidates(5000, 25);
+    
+    // Focus on first quarter of video for speed and reliability
+    qint64 minDuration = qMin(m_videoDuration1, m_videoDuration2);
+    qint64 searchDuration = minDuration / 4; // Only first quarter
+    m_offsetTestTimestamps = generateSampleTimestamps(searchDuration, 10);
+    
+    qDebug() << "Starting offset detection with" << m_offsetCandidates.size() 
+             << "offset candidates and" << m_offsetTestTimestamps.size() << "test timestamps";
+    
+    // Start the offset detection process
+    QTimer::singleShot(0, this, &VideoComparator::performOffsetDetection);
+}
+
+void VideoComparator::performOffsetDetection()
+{
+    if (!m_isDetectingOffset || m_currentOffsetIndex >= m_offsetCandidates.size()) {
+        // Detection complete - find the best offset
+        if (!m_offsetSimilarityMap.isEmpty()) {
+            qint64 bestOffset = 0;
+            double bestSimilarity = 0.0;
+            
+            for (auto it = m_offsetSimilarityMap.constBegin(); it != m_offsetSimilarityMap.constEnd(); ++it) {
+                if (it.value() > bestSimilarity) {
+                    bestSimilarity = it.value();
+                    bestOffset = it.key();
+                }
+            }
+            
+            // Simple but effective confidence calculation
+            double averageSimilarity = calculateOverallSimilarity(m_offsetSimilarityMap.values());
+            double confidence = (bestSimilarity - averageSimilarity) / averageSimilarity;
+            confidence = qMax(0.0, qMin(1.0, confidence * 2.0));
+            
+            qDebug() << "Offset detection complete. Best offset:" << bestOffset << "ms"
+                     << "with similarity:" << (bestSimilarity * 100) << "% and confidence:" << (confidence * 100) << "%";
+            
+            emit optimalOffsetFound(bestOffset, confidence);
+        }
+        
+        m_isDetectingOffset = false;
+        return;
+    }
+    
+    // Test current offset candidate
+    qint64 offsetToTest = m_offsetCandidates[m_currentOffsetIndex];
+    double similarity = testOffsetSimilarity(offsetToTest, m_offsetTestTimestamps);
+    m_offsetSimilarityMap[offsetToTest] = similarity;
+    
+    qDebug() << "Tested offset" << offsetToTest << "ms: similarity" << (similarity * 100) << "%";
+    
+    // Update progress
+    int progress = ((m_currentOffsetIndex + 1) * 100) / m_offsetCandidates.size();
+    emit comparisonProgress(progress);
+    
+    m_currentOffsetIndex++;
+    
+    // Schedule next test with minimal delay for speed
+    QTimer::singleShot(1, this, &VideoComparator::performOffsetDetection);
+}
+
+QList<qint64> VideoComparator::generateOffsetCandidates(qint64 maxOffsetMs, int stepMs)
+{
+    QList<qint64> candidates;
+    
+    // Generate candidates from negative to positive offset
+    for (qint64 offset = -maxOffsetMs; offset <= maxOffsetMs; offset += stepMs) {
+        candidates.append(offset);
+    }
+    
+    // Always include zero offset
+    if (!candidates.contains(0)) {
+        candidates.append(0);
+        std::sort(candidates.begin(), candidates.end());
+    }
+    
+    return candidates;
+}
+
+double VideoComparator::testOffsetSimilarity(qint64 offset, const QList<qint64> &testTimestamps)
+{
+    // Temporarily set the offset for testing
+    qint64 originalOffsetA = m_videoAOffset;
+    qint64 originalOffsetB = m_videoBOffset;
+    
+    // Apply the test offset (offset Video A relative to Video B)
+    m_videoAOffset = offset;
+    m_videoBOffset = 0;
+    
+    QList<double> similarities;
+    
+    for (qint64 timestamp : testTimestamps) {
+        // Skip timestamps that would go out of bounds with the current offset
+        qint64 timestampA = timestamp + m_videoAOffset;
+        qint64 timestampB = timestamp + m_videoBOffset;
+        
+        if (timestampA >= 0 && timestampA < m_videoDuration1 && 
+            timestampB >= 0 && timestampB < m_videoDuration2) {
+            
+            double similarity = compareFramesAtTimestamp(timestamp);
+            if (similarity >= 0.0) { // Only count valid comparisons
+                similarities.append(similarity);
+            }
+        }
+    }
+    
+    // Restore original offsets
+    m_videoAOffset = originalOffsetA;
+    m_videoBOffset = originalOffsetB;
+    
+    // Return average similarity, or 0 if no valid comparisons
+    return similarities.isEmpty() ? 0.0 : calculateOverallSimilarity(similarities);
+}
+

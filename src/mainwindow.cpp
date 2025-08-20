@@ -126,6 +126,12 @@ void MainWindow::setupComparisonTab()
     m_autoCompareButton->setMinimumWidth(100);
     m_autoCompareButton->setStyleSheet(theme->successButtonStyleSheet());
     
+    // Auto offset button
+    m_autoOffsetButton = new QPushButton("Auto Offset", this);
+    m_autoOffsetButton->setMinimumWidth(100);
+    m_autoOffsetButton->setStyleSheet(theme->buttonStyleSheet());
+    m_autoOffsetButton->setToolTip("Automatically detect the optimal time offset between videos");
+    
     // Relative offset control
     QLabel *offsetLabel = new QLabel("Offset A→B:");
     offsetLabel->setStyleSheet(QString("font-size: 13px; color: %1; font-weight: 500;").arg(theme->secondaryTextColor()));
@@ -167,6 +173,7 @@ void MainWindow::setupComparisonTab()
     
     controlLayout->addWidget(m_syncButton);
     controlLayout->addWidget(m_autoCompareButton);
+    controlLayout->addWidget(m_autoOffsetButton);
     controlLayout->addWidget(offsetLabel);
     controlLayout->addWidget(m_relativeOffsetSpinBox);
     controlLayout->addWidget(timelineLabel);
@@ -297,6 +304,7 @@ void MainWindow::setupComparisonTab()
             [this](const QString &path) { onVideoLoaded(1, path); });
     connect(m_syncButton, &QPushButton::clicked, this, &MainWindow::onSyncPlayback);
     connect(m_autoCompareButton, &QPushButton::clicked, this, &MainWindow::onAutoCompare);
+    connect(m_autoOffsetButton, &QPushButton::clicked, this, &MainWindow::onAutoOffset);
     connect(m_timestampSlider, &QSlider::sliderMoved, this, &MainWindow::onSeekToTimestamp);
     connect(m_timestampSlider, &QSlider::sliderPressed, this, &MainWindow::onSeekToTimestamp);
     
@@ -307,6 +315,7 @@ void MainWindow::setupComparisonTab()
     // Connect video comparator signals for auto comparison
     connect(m_comparator, &VideoComparator::comparisonProgress, this, &MainWindow::onComparisonProgress);
     connect(m_comparator, &VideoComparator::autoComparisonComplete, this, &MainWindow::onAutoComparisonComplete);
+    connect(m_comparator, &VideoComparator::optimalOffsetFound, this, &MainWindow::onOptimalOffsetFound);
     
     // Connect chapter navigation signals
     connect(m_leftChaptersList, &QListWidget::itemClicked, this, &MainWindow::onChapterSelected);
@@ -1269,6 +1278,98 @@ void MainWindow::onAutoComparisonComplete(double overallSimilarity, bool videosI
         "   font-weight: 500; "
         "}"
     ).arg(resultColor));
+}
+
+void MainWindow::onAutoOffset()
+{
+    QString leftPath = m_leftVideoWidget->currentFilePath();
+    QString rightPath = m_rightVideoWidget->currentFilePath();
+    
+    if (leftPath.isEmpty() || rightPath.isEmpty()) {
+        m_comparisonResultLabel->setText("Please load both videos before detecting optimal offset.");
+        m_comparisonResultLabel->setStyleSheet(QString(
+            "QLabel { "
+            "   font-size: 12px; "
+            "   color: %1; "
+            "   padding: 4px; "
+            "   background-color: transparent; "
+            "   border: none; "
+            "}"
+        ).arg(ThemeManager::instance()->dangerColor()));
+        return;
+    }
+    
+    // Disable button and show progress
+    m_autoOffsetButton->setEnabled(false);
+    m_autoOffsetButton->setText("Detecting...");
+    m_comparisonProgressBar->setVisible(true);
+    m_comparisonProgressBar->setValue(0);
+    m_comparisonResultLabel->setText("Fast detection: ±5s in 25ms steps (first quarter only)...");
+    m_comparisonResultLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-size: 12px; "
+        "   color: %1; "
+        "   padding: 4px; "
+        "   background-color: transparent; "
+        "   border: none; "
+        "}"
+    ).arg(ThemeManager::instance()->secondaryTextColor()));
+    
+    // Start the automatic offset detection
+    m_comparator->findOptimalOffset();
+}
+
+void MainWindow::onOptimalOffsetFound(qint64 optimalOffset, double confidence)
+{
+    // Re-enable button and hide progress
+    m_autoOffsetButton->setEnabled(true);
+    m_autoOffsetButton->setText("Auto Offset");
+    m_comparisonProgressBar->setVisible(false);
+    
+    // Update the offset spinbox with the detected value
+    m_relativeOffsetSpinBox->setValue(static_cast<int>(optimalOffset));
+    
+    // Show result message
+    QString confidenceText;
+    QColor resultColor;
+    
+    if (confidence > 0.7) {
+        confidenceText = "High";
+        resultColor = QColor(ThemeManager::instance()->successColor());
+    } else if (confidence > 0.4) {
+        confidenceText = "Medium";
+        resultColor = QColor(ThemeManager::instance()->primaryColor());
+    } else {
+        confidenceText = "Low";
+        resultColor = QColor(ThemeManager::instance()->dangerColor());
+    }
+    
+    QString resultMessage;
+    if (optimalOffset == 0) {
+        resultMessage = QString("Videos appear to be already synchronized.\nConfidence: %1 (%2%)")
+                            .arg(confidenceText)
+                            .arg(static_cast<int>(confidence * 100));
+    } else {
+        QString direction = (optimalOffset > 0) ? "later" : "earlier";
+        resultMessage = QString("Optimal offset detected: %1ms\nVideo A starts %2ms %3 than Video B.\nConfidence: %4 (%5%)")
+                            .arg(optimalOffset)
+                            .arg(qAbs(optimalOffset))
+                            .arg(direction)
+                            .arg(confidenceText)
+                            .arg(static_cast<int>(confidence * 100));
+    }
+    
+    m_comparisonResultLabel->setText(resultMessage);
+    m_comparisonResultLabel->setStyleSheet(QString(
+        "QLabel { "
+        "   font-size: 12px; "
+        "   color: %1; "
+        "   padding: 4px; "
+        "   background-color: transparent; "
+        "   border: none; "
+        "   font-weight: 500; "
+        "}"
+    ).arg(resultColor.name()));
 }
 
 void MainWindow::updateChapterLists()

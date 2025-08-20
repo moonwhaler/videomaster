@@ -73,6 +73,8 @@ private slots:
     
     // Auto comparison slots
     void onAutoCompare();
+    void onAutoOffset();
+    void onOptimalOffsetFound(qint64 optimalOffset, double confidence);
     void onComparisonProgress(int percentage);
     void onComparisonComplete(const QList<ComparisonResult> &results);
     void onAutoComparisonComplete(double overallSimilarity, bool videosIdentical, const QString &summary);
@@ -111,6 +113,7 @@ private:
     
     // Auto comparison controls
     QPushButton *m_autoCompareButton;
+    QPushButton *m_autoOffsetButton;
     QProgressBar *m_comparisonProgressBar;
     QLabel *m_comparisonResultLabel;
     

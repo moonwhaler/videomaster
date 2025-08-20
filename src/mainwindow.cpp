@@ -329,6 +329,29 @@ void MainWindow::setupComparisonTab()
                 // So Video A gets positive offset, Video B gets 0
                 m_comparator->setVideoOffset(0, value);   // Video A offset
                 m_comparator->setVideoOffset(1, 0);       // Video B baseline (no offset)
+                
+                // If playback is currently synced, re-sync immediately with new offset
+                if (m_isPlaying) {
+                    // Get current base position from slider
+                    qint64 basePosition = m_timestampSlider->value();
+                    qint64 videoAPosition = basePosition;
+                    qint64 videoBPosition = basePosition - value;  // B needs to be ahead if A is delayed
+                    
+                    // Ensure positions are within bounds
+                    videoAPosition = qMax(0LL, videoAPosition);
+                    videoBPosition = qMax(0LL, videoBPosition);
+                    
+                    // Seek both videos to their offset-adjusted positions
+                    if (!m_leftVideoWidget->currentFilePath().isEmpty()) {
+                        m_leftVideoWidget->seek(videoAPosition);
+                    }
+                    if (!m_rightVideoWidget->currentFilePath().isEmpty()) {
+                        m_rightVideoWidget->seek(videoBPosition);
+                    }
+                    
+                    qDebug() << "Re-synced playback with new offset:" << value << "ms";
+                }
+                
                 // Clear previous comparison results when offset changes
                 if (value == 0) {
                     m_comparisonResultLabel->setText("Videos synchronized. Click 'Auto Compare' to analyze similarity.");
@@ -1559,4 +1582,3 @@ void MainWindow::updateChapterNavigation()
     m_prevChapterButton->setEnabled(m_currentChapterIndex > 0);
     m_nextChapterButton->setEnabled(m_currentChapterIndex < maxChapters - 1);
 }
-
